@@ -1,40 +1,69 @@
 # ypstack
 
-유진아빠의 커스텀 Claude Code 슬래시 커맨드 모음.
+유진아빠의 커스텀 Claude Code 확장 모음.
 [gstack](https://github.com/garrytan/gstack)(Garry Tan)에서 영감을 받아 만든 개인 스킬셋.
 
-모든 스킬은 `/yp-` 접두사로 시작합니다.
+---
 
-## 스킬 목록
+## 포함된 도구
+
+### 슬래시 커맨드 (Slash Commands)
+
+Claude Code에서 `/yp-` 접두사로 호출하는 커맨드입니다.
 
 | 스킬 | 설명 |
 |------|------|
 | [`/yp-dev-log`](./yp-dev-log) | Phase 완료 시 Confluence용 Dev Log 자동 생성 + 자동 게시 |
 
-## 설치 방법
+### MCP 서버 (MCP Servers)
+
+Claude Code에 연결해 두면 자연어로 외부 서비스를 조작할 수 있는 확장 도구입니다.
+
+| MCP | 설명 | 설치 가이드 |
+|-----|------|------------|
+| [`confluence-label-mcp`](./confluence-label-mcp/INSTALL.md) | Confluence 페이지 레이블 추가·조회·삭제 | [INSTALL.md](./confluence-label-mcp/INSTALL.md) |
+
+---
+
+## 슬래시 커맨드 설치 방법
 
 ### 전체 ypstack 설치
 
 ```bash
-git clone https://github.com/jaemyny/ypstack.git ~/.claude/skills/ypstack
+git clone https://github.com/jaemyny/ypstack.git ~/ypstack
 ```
 
 ### `yp-dev-log`만 설치
 
 ```bash
 git clone https://github.com/jaemyny/ypstack.git /tmp/ypstack
-mkdir -p ~/.claude/skills/ypstack
-cp -r /tmp/ypstack/yp-dev-log ~/.claude/skills/ypstack/yp-dev-log
+mkdir -p ~/ypstack
+cp -r /tmp/ypstack/yp-dev-log ~/ypstack/yp-dev-log
 rm -rf /tmp/ypstack
 ```
 
 ### 업데이트
 
 ```bash
-cd ~/.claude/skills/ypstack && git pull
+cd ~/ypstack && git pull
 ```
 
 설치 후 Claude Code를 재시작해야 스킬이 인식됩니다.
+
+---
+
+## MCP 서버 설치 방법
+
+각 MCP 서버는 별도 설치 과정이 필요합니다. 각 폴더의 `INSTALL.md`를 참고하세요.
+
+**confluence-label-mcp** 빠른 시작:
+
+```bash
+git clone https://github.com/jaemyny/ypstack.git ~/ypstack
+bash ~/ypstack/confluence-label-mcp/setup.sh
+```
+
+→ 자세한 내용: [confluence-label-mcp/INSTALL.md](./confluence-label-mcp/INSTALL.md)
 
 ## 환경 변수 (전역)
 

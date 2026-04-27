@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "confluence-label": {
+      "command": "python3",
+      "args": ["여기에_절대경로_입력/confluence-label-mcp/server.py"],
+      "env": {
+        "CONFLUENCE_URL": "https://여기에_회사명.atlassian.net/wiki",
+        "CONFLUENCE_EMAIL": "여기에_이메일@회사.com",
+        "CONFLUENCE_TOKEN": "여기에_API_토큰_입력"
+      }
+    }
+  }
+}
