@@ -558,6 +558,12 @@ async def kb_get_price_stats(
         else:
             return f"오류: 지원하지 않는 stat_type입니다. ('매매지수', '전세지수', 'HAI', 'PIR' 중 하나를 선택하세요)"
 
+        # 지역코드 필터 (API가 region_code를 무시하는 경우 대응)
+        region_cols = [c for c in df.columns if "지역코드" in c]
+        if region_cols:
+            rc = region_cols[0]
+            df = df[df[rc].astype(str).str.startswith(region_code.zfill(2))].copy()
+
         # 날짜 컬럼으로 최근 N개월만 자르기 (기간 파라미터가 무시되는 API 대응)
         date_cols = [c for c in df.columns if "날짜" in c or "date" in c.lower() or "ym" in c.lower()]
         if date_cols and period:
@@ -565,7 +571,7 @@ async def kb_get_price_stats(
             df[dc] = pd.to_datetime(df[dc], errors="coerce")
             cutoff = pd.Timestamp.now() - pd.DateOffset(months=period)
             df = df[df[dc] >= cutoff].copy()
-            df[dc] = df[dc].dt.strftime("%Y-%m-%d")
+            df[dc] = df[dc].dt.strftime("%Y-%m")
 
         result = json.loads(df.to_json(orient="records", force_ascii=False))
         return json.dumps({
@@ -574,7 +580,7 @@ async def kb_get_price_stats(
             "period_months": period,
             "count": len(result),
             "data": result,
-        }, ensure_ascii=False, indent=2)
+        }, ensure_ascii=False)
     except Exception as e:
         return _err(e)
 

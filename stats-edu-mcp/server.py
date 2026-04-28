@@ -101,7 +101,7 @@ async def neis_get_school_list(
         "KEY": key,
         "Type": "json",
         "pIndex": 1,
-        "pSize": min(limit, 1000),
+        "pSize": 1000 if district else min(limit, 1000),
         "ATPT_OFCDC_SC_CODE": edu_code,
         "SCHUL_KND_SC_NM": school_type,
     }

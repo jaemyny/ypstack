@@ -348,45 +348,33 @@ async def dart_search_company(corp_name: str, limit: Optional[int] = 10) -> str:
     except ValueError as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
-    # 최근 1년 공시 검색으로 기업명 → corp_code 매핑
-    from datetime import datetime, timedelta
-    bgn_de = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
-    url = f"{DART_BASE}/list.json"
-    params = {
-        "crtfc_key": key,
-        "corp_name": corp_name,
-        "bgn_de": bgn_de,
-        "page_count": str(min(limit * 5, 100)),  # 이름 중복 대비 넉넉히 조회
-    }
+    # corpCode.xml(ZIP) 다운로드 → 기업명 부분일치 검색
+    import io, zipfile, xml.etree.ElementTree as ET
+    zip_url = f"{DART_BASE}/corpCode.xml?crtfc_key={key}"
     try:
-        data = await _get(url, params)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.get(zip_url)
+            resp.raise_for_status()
+            zf = zipfile.ZipFile(io.BytesIO(resp.content))
+            xml_data = zf.read(zf.namelist()[0])
+            root = ET.fromstring(xml_data)
     except Exception as e:
-        return json.dumps({"error": f"API 호출 실패: {e}"}, ensure_ascii=False)
+        return json.dumps({"error": f"DART corpCode 다운로드 실패: {e}"}, ensure_ascii=False)
 
-    status = data.get("status", "")
-    if status not in ("000", "013"):  # 013 = 데이터 없음
-        return json.dumps(
-            {"error": data.get("message", f"DART 오류 코드: {status}")},
-            ensure_ascii=False,
-        )
-
-    # corp_code 기준 중복 제거
-    seen: dict = {}
-    for c in data.get("list", []):
-        cc = c.get("corp_code", "")
-        if cc and cc not in seen:
-            seen[cc] = c
-
-    companies_raw = list(seen.values())
-    companies = [
-        {
-            "corp_code": c.get("corp_code", ""),
-            "corp_name": c.get("corp_name", ""),
-            "stock_code": c.get("stock_code", "-"),
-            "modify_date": c.get("rcept_dt", ""),
-        }
-        for c in companies_raw[:limit]
-    ]
+    companies = []
+    for item in root.findall("list"):
+        name = item.findtext("corp_name", "")
+        if corp_name.lower() not in name.lower():
+            continue
+        stock_code = item.findtext("stock_code", "").strip()
+        companies.append({
+            "corp_code": item.findtext("corp_code", ""),
+            "corp_name": name,
+            "stock_code": stock_code if stock_code else "-",
+            "modify_date": item.findtext("modify_date", ""),
+        })
+        if len(companies) >= limit:
+            break
 
     result = {"count": len(companies), "companies": companies}
     return json.dumps(result, ensure_ascii=False, indent=2)
