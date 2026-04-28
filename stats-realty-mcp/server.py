@@ -434,8 +434,13 @@ async def molit_get_housing_permit(
 
 
 # ---------------------------------------------------------------------------
-# 도구 7: 한국부동산원 가격지수
+# 도구 7: 한국부동산원 아파트 가격지수 (KOSIS 경유 — orgId=408)
 # ---------------------------------------------------------------------------
+
+_REB_TBL = {
+    "매매": ("408", "DT_304004_WEEK_002_B"),  # 주간 아파트 매매가격지수
+    "전세": ("408", "DT_304004_WEEK_004_A"),  # 주간 아파트 전세가격지수
+}
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
 async def reb_get_price_index(
@@ -443,72 +448,67 @@ async def reb_get_price_index(
     stat_type: str = "매매",
     region: Optional[str] = None,
 ) -> str:
-    """한국부동산원 R-ONE 가격지수를 조회합니다.
+    """한국부동산원 아파트 가격지수를 조회합니다 (KOSIS 한국부동산원, 주간).
 
     Args:
-        year_month: 조회년월 (YYYYMM, 예: "202403")
-        stat_type: 통계 유형 ("매매", "전세", "월세" 중 하나, 기본 "매매")
-        region: 지역명 필터 (선택, 예: "서울")
+        year_month: 조회년월 (YYYYMM, 예: "202503") — 해당 월의 주간 데이터를 반환
+        stat_type: 통계 유형 ("매매" 또는 "전세", 기본 "매매")
+        region: 지역명 필터 (선택, 예: "서울", "수도권", "전국")
     """
-    if not REB_API_KEY:
-        return "오류: REB_API_KEY 환경변수가 설정되지 않았습니다."
+    if not KOSIS_API_KEY:
+        return "오류: KOSIS_API_KEY 환경변수가 설정되지 않았습니다."
+    if stat_type not in _REB_TBL:
+        return json.dumps(
+            {"error": f"지원하지 않는 stat_type: {stat_type}. ('매매' 또는 '전세')"},
+            ensure_ascii=False, indent=2,
+        )
+    org_id, tbl_id = _REB_TBL[stat_type]
+    # YYYYMM → 주간 범위: YYYYMM01 ~ YYYYMM31
+    start_w = year_month + "01"
+    end_w   = year_month + "31"
     try:
+        url = f"{KOSIS_BASE}/Param/statisticsParameterData.do"
         params = {
-            "serviceKey": REB_API_KEY,
-            "numOfRows": "100",
-            "pageNo": "1",
-            "STAT_YM": year_month,
-            "_type": "json",
+            "method": "getList",
+            "apiKey": KOSIS_API_KEY,
+            "orgId": org_id,
+            "tblId": tbl_id,
+            "itmId": "ALL",
+            "objL1": "ALL",
+            "prdSe": "W",
+            "startPrdDe": start_w,
+            "endPrdDe": end_w,
+            "format": "json",
+            "jsonVD": "Y",
         }
-        raw_response = None
-        async with httpx.AsyncClient(timeout=30.0) as c:
-            r = await c.get(REB_BASE, params=params)
-            r.raise_for_status()
-            raw_response = r.text
+        data = await _get_json(url, params)
+        if isinstance(data, dict) and data.get("err"):
+            return json.dumps(
+                {"error": f"KOSIS 오류 {data['err']}: {data.get('errMsg', '')}"},
+                ensure_ascii=False, indent=2,
+            )
 
-        # JSON 응답 시도
-        try:
-            data = json.loads(raw_response)
-            items = []
-            # 응답 구조 탐색
-            if isinstance(data, dict):
-                body = data.get("response", data).get("body", data)
-                items_raw = body.get("items", {})
-                if isinstance(items_raw, dict):
-                    items = items_raw.get("item", [])
-                elif isinstance(items_raw, list):
-                    items = items_raw
-            elif isinstance(data, list):
-                items = data
+        rows = data if isinstance(data, list) else []
+        if region:
+            rows = [r for r in rows if region in r.get("C1_NM", "")]
 
-            if region:
-                items = [i for i in items if region in str(i.get("regionNm", ""))]
-
-            return json.dumps({
-                "stat_type": stat_type,
-                "year_month": year_month,
-                "count": len(items),
-                "data": items,
-            }, ensure_ascii=False, indent=2)
-
-        except (json.JSONDecodeError, AttributeError):
-            # XML 폴백
-            root = ET.fromstring(raw_response)
-            xml_items = root.findall(".//item")
-            result = []
-            for item in xml_items:
-                row = {child.tag: (child.text.strip() if child.text else "") for child in item}
-                if region and region not in row.get("regionNm", ""):
-                    continue
-                result.append(row)
-
-            return json.dumps({
-                "stat_type": stat_type,
-                "year_month": year_month,
-                "count": len(result),
-                "data": result,
-            }, ensure_ascii=False, indent=2)
-
+        result_rows = [
+            {
+                "region": r.get("C1_NM", ""),
+                "week": r.get("PRD_DE", ""),
+                "index": r.get("DT", ""),
+                "unit": r.get("UNIT_NM", ""),
+                "item": r.get("ITM_NM", ""),
+            }
+            for r in rows
+        ]
+        return json.dumps({
+            "stat_type": stat_type,
+            "year_month": year_month,
+            "source": f"KOSIS 한국부동산원 ({tbl_id})",
+            "count": len(result_rows),
+            "data": result_rows,
+        }, ensure_ascii=False, indent=2)
     except Exception as e:
         return _err(e)
 
@@ -557,6 +557,18 @@ async def kb_get_price_stats(
             df = api.get_pir("01", 지역코드=region_code, 기간=str(period))
         else:
             return f"오류: 지원하지 않는 stat_type입니다. ('매매지수', '전세지수', 'HAI', 'PIR' 중 하나를 선택하세요)"
+
+        # PublicDataReader가 None 반환하는 경우 (지원하지 않는 지역코드)
+        if df is None:
+            return json.dumps({
+                "error": (
+                    f"지역코드 '{region_code}'에 대한 데이터를 불러오지 못했습니다. "
+                    "KB부동산 API가 지원하는 코드인지 확인하세요. "
+                    "(예: 11=서울, 26=부산, 27=대구, 28=인천, 29=광주, 30=대전, 31=울산, 36=세종)"
+                ),
+                "stat_type": stat_type,
+                "region_code": region_code,
+            }, ensure_ascii=False, indent=2)
 
         # 지역코드 필터 (API가 region_code를 무시하는 경우 대응)
         region_cols = [c for c in df.columns if "지역코드" in c]

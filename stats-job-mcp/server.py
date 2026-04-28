@@ -237,7 +237,7 @@ async def kosis_get_business_count(
     try:
         rows = await _kosis_fetch(
             org_id="101",
-            tbl_id="DT_1BC01",
+            tbl_id="DT_1K52F08",
             itm_id="ALL",
             obj_l1="ALL",
             prd_se="Y",
@@ -251,7 +251,7 @@ async def kosis_get_business_count(
 
     return json.dumps(
         {
-            "type": "전국사업체조사 (사업체수·종사자수)",
+            "type": "시도·산업별 사업체수·종사자수·매출액 (전국사업체조사 2020~)",
             "region": region,
             "year": year,
             "count": len(parsed),

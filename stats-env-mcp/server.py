@@ -255,15 +255,28 @@ async def seoul_get_park_list(
     if not key:
         return "오류: SEOUL_API_KEY 환경변수가 설정되지 않았습니다."
 
-    url = f"{SEOUL_BASE}/{key}/json/searchParkInfo/1/100/"
+    # 서울 공원 API: searchParkInfo 또는 SeoulParkInfo 응답키 시도
+    url = f"{SEOUL_BASE}/{key}/json/searchParkInfo/1/1000/"
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(url)
         resp.raise_for_status()
         data = resp.json()
 
-    rows = data.get("searchParkInfo", {}).get("row", [])
+    # 응답 키 탐색 (searchParkInfo / SeoulParkInfo / row 직접)
+    rows = []
+    for root_key in ("searchParkInfo", "SeoulParkInfo", "RESULT"):
+        candidate = data.get(root_key, {})
+        if isinstance(candidate, dict):
+            rows = candidate.get("row", [])
+            if rows:
+                break
+    if not rows and isinstance(data, list):
+        rows = data
+
     if not rows:
-        return json.dumps({"error": "공원 데이터가 없습니다."}, ensure_ascii=False, indent=2)
+        result_info = data.get("RESULT", {})
+        msg = result_info.get("MESSAGE", "공원 데이터가 없습니다.")
+        return json.dumps({"error": msg, "raw_keys": list(data.keys())}, ensure_ascii=False, indent=2)
 
     parks = []
     for row in rows:

@@ -184,11 +184,12 @@ async def ecos_get_interest_rate(
 # ---------------------------------------------------------------------------
 
 INDICATOR_MAP = {
-    "GDP":   ("200Y001", "QQ"),
-    "CPI":   ("901Y062", "MM"),
-    "환율":  ("036Y001", "DD"),
-    "실업률": ("901Y027", "MM"),
-    "통화량": ("101Y002", "MM"),
+    # (stat_code, ecos_cycle, item_code)  — ecos_cycle: M/D/Q/A
+    "CPI":    ("901Y009", "M", ""),    # 소비자물가지수 총지수 (월별)
+    "환율":   ("731Y001", "D", ""),    # 주요국 대원화환율 (일별, 원달러 포함)
+    "실업률": ("901Y027", "M", ""),    # 경제활동인구조사 (월별, 실업률/취업자 등 포함)
+    "GDP":    ("200Y001", "Q", ""),    # GDP 분기 (날짜 형식: YYYYMM01~YYYYMM31)
+    "통화량": ("101Y002", "M", "BBHS00"), # M2 광의통화 계절조정 (월별)
 }
 
 
@@ -203,10 +204,10 @@ async def ecos_get_economic_indicator(
     한국 주요 경제지표 조회.
 
     Args:
-        indicator: 지표명 — "GDP" | "CPI" | "환율" | "실업률" | "통화량"
-        start_date: 시작일 (YYYYMM 또는 YYYY)
-        end_date: 종료일 (YYYYMM 또는 YYYY)
-        cycle: 주기 DD/MM/QQ/YY. 미입력 시 지표별 기본값 사용
+        indicator: 지표명 — "CPI" | "환율" | "실업률" | "GDP" | "통화량"
+        start_date: 시작일 (YYYYMM, 환율은 YYYYMMDD)
+        end_date: 종료일 (YYYYMM, 환율은 YYYYMMDD)
+        cycle: ECOS 주기 M/D/Q/A. 미입력 시 지표별 기본값 사용
 
     Returns:
         JSON 문자열 — {indicator, stat_code, period, count, data:[{date, value, unit}]}
@@ -225,12 +226,24 @@ async def ecos_get_economic_indicator(
             ensure_ascii=False,
         )
 
-    stat_code, default_cycle = INDICATOR_MAP[indicator]
+    stat_code, default_cycle, item_code = INDICATOR_MAP[indicator]
     use_cycle = cycle or default_cycle
+
+    # 주기별 날짜 포맷 변환
+    def _fmt(d: str, cyc: str) -> str:
+        if cyc == "A" and len(d) >= 4:
+            return d[:4]           # YYYYMM → YYYY (연간)
+        if cyc == "D" and len(d) == 6:
+            return d + "01"        # YYYYMM → YYYYMMDD (일별)
+        return d
+
+    s = _fmt(start_date, use_cycle)
+    e = _fmt(end_date, use_cycle)
+    item_suffix = f"/{item_code}" if item_code else ""
 
     url = (
         f"{ECOS_BASE}/StatisticSearch/{key}/json/kr/1/200"
-        f"/{stat_code}/{use_cycle}/{start_date}/{end_date}"
+        f"/{stat_code}/{use_cycle}/{s}/{e}{item_suffix}"
     )
     try:
         data = await _get(url)
