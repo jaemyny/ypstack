@@ -31,17 +31,20 @@ def _dart_key() -> str:
 ECOS_BASE = "https://ecos.bok.or.kr/api"
 DART_BASE = "https://opendart.fss.or.kr/api"
 
-# YYYYMM → YYYYMMDD 자동 변환
-def _ecos_date(d: str) -> str:
-    return d + "01" if len(d) == 6 else d
+# 주기별 날짜 포맷 변환
+def _ecos_date(d: str, cycle: str = "M") -> str:
+    """ECOS 날짜 포맷 변환. 일별(D)은 YYYYMMDD, 월별(M)/기타는 YYYYMM 그대로."""
+    if cycle == "D" and len(d) == 6:
+        return d + "01"
+    return d
 
-# stat_code별 기본 아이템코드+주기 매핑
+# stat_code별 아이템코드+기본주기 매핑
 ECOS_ITEM_MAP = {
-    "722Y001": ("0101000", "D"),   # 기준금리
-    "817Y002": ("0000000", "D"),   # CD금리
+    "722Y001": ("0101000", "M"),   # 기준금리 (월별 집계 가능)
+    "817Y002": ("0000000", "D"),   # CD금리 (일별)
     "121Y006": ("BECBLA01", "M"),  # 예금은행 대출금리(신규)
-    "731Y003": ("5000000", "D"),   # 국고채 3년
-    "731Y005": ("5020000", "D"),   # 국고채 10년
+    "731Y003": ("5000000", "D"),   # 국고채 3년 (일별)
+    "731Y005": ("5020000", "D"),   # 국고채 10년 (일별)
 }
 
 
@@ -112,23 +115,23 @@ async def ecos_get_interest_rate(
     start_date: str,
     end_date: str,
     stat_code: Optional[str] = "722Y001",
-    cycle: Optional[str] = "MM",
+    cycle: Optional[str] = None,
 ) -> str:
     """
     한국은행 ECOS 금리 데이터 조회.
 
     주요 stat_code:
-      722Y001 = 기준금리 (기본값)
-      817Y002 = CD금리 (91일)
-      121Y006 = COFIX (신규취급액기준)
-      731Y003 = 국고채 3년
-      731Y005 = 국고채 10년
+      722Y001 = 기준금리 (기본값, 월별)
+      817Y002 = CD금리 (91일, 일별)
+      121Y006 = COFIX (신규취급액기준, 월별)
+      731Y003 = 국고채 3년 (일별)
+      731Y005 = 국고채 10년 (일별)
 
     Args:
-        start_date: 시작일 YYYYMM
-        end_date: 종료일 YYYYMM
+        start_date: 시작일 YYYYMM (예: "202301")
+        end_date: 종료일 YYYYMM (예: "202412")
         stat_code: 통계코드 (기본 722Y001 = 기준금리)
-        cycle: 주기 DD/MM/QQ/YY (기본 MM)
+        cycle: 주기 D/M/Q/Y (미입력 시 stat_code 기본값 사용)
 
     Returns:
         JSON 문자열 — {stat_code, period, count, data:[{date, stat_name, item_name, value, unit}]}
@@ -138,13 +141,13 @@ async def ecos_get_interest_rate(
     except ValueError as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
-    item_code, default_cycle = ECOS_ITEM_MAP.get(stat_code, ("", "D"))
-    use_cycle = cycle if cycle != "MM" else default_cycle
-    s = _ecos_date(start_date)
-    e = _ecos_date(end_date)
+    item_code, default_cycle = ECOS_ITEM_MAP.get(stat_code, ("", "M"))
+    use_cycle = cycle or default_cycle
+    s = _ecos_date(start_date, use_cycle)
+    e = _ecos_date(end_date, use_cycle)
     item_suffix = f"/{item_code}" if item_code else ""
     url = (
-        f"{ECOS_BASE}/StatisticSearch/{key}/json/kr/1/200"
+        f"{ECOS_BASE}/StatisticSearch/{key}/json/kr/1/120"
         f"/{stat_code}/{use_cycle}/{s}/{e}{item_suffix}"
     )
     try:
@@ -282,20 +285,20 @@ async def ecos_get_housing_loan_rate(start_date: str, end_date: str) -> str:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
     targets = [
-        ("121Y006", "MM", "COFIX (신규취급액기준)"),
-        ("722Y001", "MM", "한국은행 기준금리"),
+        ("121Y006", "COFIX (신규취급액기준)"),
+        ("722Y001", "한국은행 기준금리"),
     ]
 
     series = []
     async with httpx.AsyncClient(timeout=30.0) as client:
-        for stat_code, cyc, label in targets:
-            item_code, default_cycle = ECOS_ITEM_MAP.get(stat_code, ("", "D"))
-            use_cycle = cyc if cyc != "MM" else default_cycle
-            s = _ecos_date(start_date)
-            e = _ecos_date(end_date)
+        for stat_code, label in targets:
+            item_code, default_cycle = ECOS_ITEM_MAP.get(stat_code, ("", "M"))
+            use_cycle = default_cycle
+            s = _ecos_date(start_date, use_cycle)
+            e = _ecos_date(end_date, use_cycle)
             item_suffix = f"/{item_code}" if item_code else ""
             url = (
-                f"{ECOS_BASE}/StatisticSearch/{key}/json/kr/1/10000"
+                f"{ECOS_BASE}/StatisticSearch/{key}/json/kr/1/120"
                 f"/{stat_code}/{use_cycle}/{s}/{e}{item_suffix}"
             )
             try:
