@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "stats-env": {
+      "command": "python3",
+      "args": ["절대경로/stats-env-mcp/server.py"],
+      "env": {
+        "DATA_GO_KR_KEY": "여기에_공공데이터포털_키",
+        "SEOUL_API_KEY":  "여기에_서울열린데이터_키",
+        "KOSIS_API_KEY":  "여기에_KOSIS_키"
+      }
+    }
+  }
+}

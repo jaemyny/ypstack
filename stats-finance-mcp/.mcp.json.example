@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "stats-finance": {
+      "command": "python3",
+      "args": ["절대경로/stats-finance-mcp/server.py"],
+      "env": {
+        "ECOS_API_KEY": "여기에_한국은행_ECOS_키",
+        "DART_API_KEY": "여기에_OpenDART_키"
+      }
+    }
+  }
+}

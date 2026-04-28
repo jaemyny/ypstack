@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "stats-job": {
+      "command": "python3",
+      "args": ["절대경로/stats-job-mcp/server.py"],
+      "env": {
+        "KOSIS_API_KEY":  "여기에_KOSIS_키",
+        "DATA_GO_KR_KEY": "여기에_공공데이터포털_키"
+      }
+    }
+  }
+}

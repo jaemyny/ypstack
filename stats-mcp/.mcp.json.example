@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "stats": {
+      "command": "python3",
+      "args": ["절대경로/stats-mcp/server.py"],
+      "env": {
+        "KOSIS_API_KEY":        "여기에_KOSIS_키",
+        "SGIS_CONSUMER_KEY":    "여기에_SGIS_consumer_key",
+        "SGIS_CONSUMER_SECRET": "여기에_SGIS_consumer_secret",
+        "SEOUL_API_KEY":        "여기에_서울열린데이터_키",
+        "GG_API_KEY":           "여기에_경기데이터드림_키"
+      }
+    }
+  }
+}

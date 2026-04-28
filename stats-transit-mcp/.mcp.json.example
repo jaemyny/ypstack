@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "stats-transit": {
+      "command": "python3",
+      "args": ["절대경로/stats-transit-mcp/server.py"],
+      "env": {
+        "SEOUL_API_KEY": "여기에_서울열린데이터_키",
+        "KOSIS_API_KEY": "여기에_KOSIS_키"
+      }
+    }
+  }
+}

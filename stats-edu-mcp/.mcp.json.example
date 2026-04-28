@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "stats-edu": {
+      "command": "python3",
+      "args": ["절대경로/stats-edu-mcp/server.py"],
+      "env": {
+        "NEIS_API_KEY":  "여기에_NEIS_키",
+        "KOSIS_API_KEY": "여기에_KOSIS_키"
+      }
+    }
+  }
+}

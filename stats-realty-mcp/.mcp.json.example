@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "stats-realty": {
+      "command": "python3",
+      "args": ["절대경로/stats-realty-mcp/server.py"],
+      "env": {
+        "DATA_GO_KR_KEY": "여기에_공공데이터포털_키",
+        "REB_API_KEY":    "여기에_한국부동산원_R-ONE_키",
+        "KOSIS_API_KEY":  "여기에_KOSIS_키"
+      }
+    }
+  }
+}
