@@ -348,33 +348,42 @@ async def dart_search_company(corp_name: str, limit: Optional[int] = 10) -> str:
     except ValueError as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
-    url = f"{DART_BASE}/company.json"
-    params = {"crtfc_key": key, "corp_name": corp_name}
+    # 최근 1년 공시 검색으로 기업명 → corp_code 매핑
+    from datetime import datetime, timedelta
+    bgn_de = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+    url = f"{DART_BASE}/list.json"
+    params = {
+        "crtfc_key": key,
+        "corp_name": corp_name,
+        "bgn_de": bgn_de,
+        "page_count": str(min(limit * 5, 100)),  # 이름 중복 대비 넉넉히 조회
+    }
     try:
         data = await _get(url, params)
     except Exception as e:
         return json.dumps({"error": f"API 호출 실패: {e}"}, ensure_ascii=False)
 
     status = data.get("status", "")
-    if status != "000":
+    if status not in ("000", "013"):  # 013 = 데이터 없음
         return json.dumps(
             {"error": data.get("message", f"DART 오류 코드: {status}")},
             ensure_ascii=False,
         )
 
-    # 단건 또는 복수 응답 처리
-    raw = data.get("corp_code")
-    if raw:
-        companies_raw = [data]
-    else:
-        companies_raw = data.get("list", [])
+    # corp_code 기준 중복 제거
+    seen: dict = {}
+    for c in data.get("list", []):
+        cc = c.get("corp_code", "")
+        if cc and cc not in seen:
+            seen[cc] = c
 
+    companies_raw = list(seen.values())
     companies = [
         {
             "corp_code": c.get("corp_code", ""),
             "corp_name": c.get("corp_name", ""),
-            "stock_code": c.get("stock_code", ""),
-            "modify_date": c.get("modify_date", ""),
+            "stock_code": c.get("stock_code", "-"),
+            "modify_date": c.get("rcept_dt", ""),
         }
         for c in companies_raw[:limit]
     ]

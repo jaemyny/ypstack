@@ -533,6 +533,7 @@ async def kb_get_price_stats(
     if not HAS_KBLAND:
         return "오류: PublicDataReader 미설치. pip install PublicDataReader"
     try:
+        import pandas as pd
         api = Kbland()
         if stat_type == "매매지수":
             df = api.get_price_index(
@@ -557,7 +558,23 @@ async def kb_get_price_stats(
         else:
             return f"오류: 지원하지 않는 stat_type입니다. ('매매지수', '전세지수', 'HAI', 'PIR' 중 하나를 선택하세요)"
 
-        return df.to_json(orient="records", force_ascii=False)
+        # 날짜 컬럼으로 최근 N개월만 자르기 (기간 파라미터가 무시되는 API 대응)
+        date_cols = [c for c in df.columns if "날짜" in c or "date" in c.lower() or "ym" in c.lower()]
+        if date_cols and period:
+            dc = date_cols[0]
+            df[dc] = pd.to_datetime(df[dc], errors="coerce")
+            cutoff = pd.Timestamp.now() - pd.DateOffset(months=period)
+            df = df[df[dc] >= cutoff].copy()
+            df[dc] = df[dc].dt.strftime("%Y-%m-%d")
+
+        result = json.loads(df.to_json(orient="records", force_ascii=False))
+        return json.dumps({
+            "stat_type": stat_type,
+            "region_code": region_code,
+            "period_months": period,
+            "count": len(result),
+            "data": result,
+        }, ensure_ascii=False, indent=2)
     except Exception as e:
         return _err(e)
 
