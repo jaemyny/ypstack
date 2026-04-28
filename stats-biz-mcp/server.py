@@ -282,14 +282,14 @@ async def seoul_get_floating_population(
         rows = [rows]
 
     if area_code:
-        rows = [r for r in rows if r.get("SIGNGU_CD", "") == area_code]
+        rows = [r for r in rows if r.get("SIGNGU_CODE_SE", r.get("SIGNGU_CD", "")) == str(area_code)]
 
     records = [
         {
-            "STDR_DE": r.get("STDR_DE", ""),
-            "SIGNGU_CD": r.get("SIGNGU_CD", ""),
-            "SIGNGU_NM": r.get("SIGNGU_NM", ""),
-            "TOT_LVPOP_CO": r.get("TOT_LVPOP_CO", ""),
+            "date": r.get("STDR_DE_ID", r.get("STDR_DE", "")),
+            "area_code": r.get("SIGNGU_CODE_SE", r.get("SIGNGU_CD", "")),
+            "area_name": r.get("SIGNGU_NM", ""),
+            "total_population": r.get("TOT_LVPOP_CO", ""),
         }
         for r in rows
     ]

@@ -104,7 +104,6 @@ async def neis_get_school_list(
         "pSize": min(limit, 1000),
         "ATPT_OFCDC_SC_CODE": edu_code,
         "SCHUL_KND_SC_NM": school_type,
-        "LCTN_SC_NM": region,
     }
 
     url = f"{NEIS_BASE}/schoolInfo"

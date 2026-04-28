@@ -189,8 +189,8 @@ async def kosis_get_wage_stats(
 
     try:
         rows = await _kosis_fetch(
-            org_id="350",
-            tbl_id="DT_LB_EW",
+            org_id="101",
+            tbl_id="DT_1YL15006",
             itm_id="ALL",
             obj_l1="ALL",
             prd_se="Y",
