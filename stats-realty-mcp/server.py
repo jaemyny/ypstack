@@ -553,7 +553,7 @@ async def kb_get_price_stats(
         elif stat_type == "HAI":
             df = api.get_hai(지역코드=region_code, 기간=str(period))
         elif stat_type == "PIR":
-            df = api.get_pir(지역코드=region_code, 기간=str(period))
+            df = api.get_pir("01", 지역코드=region_code, 기간=str(period))
         else:
             return f"오류: 지원하지 않는 stat_type입니다. ('매매지수', '전세지수', 'HAI', 'PIR' 중 하나를 선택하세요)"
 

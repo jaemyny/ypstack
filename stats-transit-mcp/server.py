@@ -71,51 +71,61 @@ def _get_kosis_key() -> Optional[str]:
 @mcp.tool(annotations=_TOOL_ANNOTATIONS)
 async def seoul_get_subway_ridership(
     year: str,
-    month: str,
-    station_name: Optional[str] = None,
+    line: Optional[str] = None,
 ) -> str:
-    """서울 지하철 역별 승하차 인원 월간 통계 조회.
+    """전국 지하철 노선별 연간 수송인원 통계 조회 (KOSIS).
 
     Args:
-        year: 조회 연도 (YYYY, 예: "2024")
-        month: 조회 월 (MM, 예: "01", "12")
-        station_name: 역명 필터 (선택, 예: "강남", "홍대입구")
+        year: 조회 연도 (YYYY, 예: "2023")
+        line: 호선 필터 (선택, 예: "1호선", "2호선", "합계")
     """
-    key = _get_seoul_key()
+    key = _get_kosis_key()
     if not key:
-        return "오류: SEOUL_API_KEY 환경변수가 설정되지 않았습니다."
+        return "오류: KOSIS_API_KEY 환경변수가 설정되지 않았습니다."
 
-    url = f"{SEOUL_BASE}/{key}/json/CardSubwayStatsNew/1/500/{year}/{month}/"
+    url = f"{KOSIS_BASE}/Param/statisticsParameterData.do"
+    params = {
+        "method": "getList",
+        "apiKey": key,
+        "orgId": "201",
+        "tblId": "DT_201004_O100011",
+        "itmId": "T001",          # 수송인원
+        "objL1": "ALL",
+        "prdSe": "Y",
+        "startPrdDe": year,
+        "endPrdDe": year,
+        "format": "json",
+        "jsonVD": "Y",
+    }
+
     async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(url)
+        resp = await client.get(url, params=params)
         resp.raise_for_status()
         data = resp.json()
 
-    rows = data.get("CardSubwayStatsNew", {}).get("row", [])
-    if not rows:
-        return json.dumps({"error": "데이터가 없습니다.", "year_month": f"{year}-{month}"}, ensure_ascii=False, indent=2)
+    if isinstance(data, dict) and data.get("err"):
+        return json.dumps({"error": f"KOSIS 오류: {data.get('errMsg', data)}"}, ensure_ascii=False, indent=2)
 
-    stations = []
+    rows = data if isinstance(data, list) else []
+
+    records = []
     for row in rows:
-        name = row.get("SUB_STA_NM", "")
-        if station_name and station_name not in name:
+        nm = row.get("C1_NM", "")
+        if line and line not in nm:
             continue
-        ride = int(row.get("RIDE_PASGR_NUM", 0) or 0)
-        alight = int(row.get("ALIGHT_PASGR_NUM", 0) or 0)
-        stations.append({
-            "station_nm": name,
-            "use_mon": row.get("USE_MON", ""),
-            "ride_count": ride,
-            "alight_count": alight,
-            "total_count": ride + alight,
+        records.append({
+            "line": nm,
+            "year": row.get("PRD_DE", ""),
+            "passengers_1000": row.get("DT", ""),
+            "unit": row.get("UNIT_NM", "천명"),
         })
 
-    stations.sort(key=lambda x: x["total_count"], reverse=True)
-
     result = {
-        "year_month": f"{year}-{month}",
-        "count": len(stations),
-        "stations": stations,
+        "year": year,
+        "line_filter": line,
+        "count": len(records),
+        "note": "수송인원 단위: 천명",
+        "data": records,
     }
     return json.dumps(result, ensure_ascii=False, indent=2)
 

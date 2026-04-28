@@ -129,7 +129,7 @@ async def kosis_get_employment_stats(
     year: Optional[Union[str, int]] = None,
 ) -> str:
     """
-    KOSIS에서 시도별 취업자수·실업률 등 고용통계를 조회합니다 (tblId=DT_1DA7002S).
+    KOSIS에서 시도별 취업자수·실업률 등 고용통계를 조회합니다 (tblId=DT_1DA7004S).
 
     Args:
         region: 지역명 필터 (예: "서울", "경기", None=전체)
@@ -143,7 +143,7 @@ async def kosis_get_employment_stats(
     try:
         rows = await _kosis_fetch(
             org_id="101",
-            tbl_id="DT_1DA7002S",
+            tbl_id="DT_1DA7004S",
             itm_id="ALL",
             obj_l1="ALL",
             prd_se="Y",
@@ -157,7 +157,7 @@ async def kosis_get_employment_stats(
 
     return json.dumps(
         {
-            "type": "지역별 고용통계 (취업자·실업률)",
+            "type": "행정구역(시도)별 경제활동인구",
             "region": region,
             "year": year,
             "count": len(parsed),
@@ -331,6 +331,8 @@ async def nps_get_subscriber_stats(
 ) -> str:
     """
     국민연금공단 API에서 지역별 사업장수·가입자수를 조회합니다.
+    ※ 현재 API 서버 점검 중일 수 있습니다. 대안으로 kosis_search_job_stats(keyword="국민연금")로
+       관련 통계표를 검색할 수 있습니다.
 
     Args:
         sido_cd: 시도 코드 (예: "11"=서울, "41"=경기, "26"=부산, None=전체)
@@ -356,17 +358,39 @@ async def nps_get_subscriber_stats(
         r = await c.get(url, params=params)
         raw = r.text
 
+    # HTTP 오류 처리
+    if r.status_code >= 400:
+        return json.dumps(
+            {
+                "error": f"국민연금 API 서버 오류 (HTTP {r.status_code}): {raw[:200]}",
+                "hint": "API 서버 점검 중일 수 있습니다. kosis_search_job_stats(keyword='국민연금')으로 대체 통계표를 검색하세요.",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     # XML 파싱
     try:
         root = ET.fromstring(raw)
     except ET.ParseError as e:
-        return f"XML 파싱 오류: {e}\n응답 원문: {raw[:500]}"
+        return json.dumps(
+            {
+                "error": f"XML 파싱 오류: {e}",
+                "raw": raw[:300],
+                "hint": "kosis_search_job_stats(keyword='국민연금')으로 대체 통계표를 검색하세요.",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     result_code = root.findtext(".//resultCode", "")
     result_msg = root.findtext(".//resultMsg", "")
 
     if result_code not in ("00", "000", "0000"):
-        return f"국민연금 API 오류 [{result_code}]: {result_msg}"
+        return json.dumps(
+            {"error": f"국민연금 API 오류 [{result_code}]: {result_msg}"},
+            ensure_ascii=False,
+        )
 
     total_count = root.findtext(".//totalCount", "0")
     items = root.findall(".//item")

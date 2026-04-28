@@ -4,7 +4,7 @@ stats-biz-mcp: 소상공인 상가정보 + 서울 유동인구 + 한국부동산
 import json
 import os
 from collections import Counter
-from typing import Optional
+from typing import Optional, Union
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -242,7 +242,7 @@ async def semas_search_commercial_area(
 @mcp.tool()
 async def seoul_get_floating_population(
     date: str,
-    area_code: Optional[str] = None,
+    area_code: Optional[Union[str, int]] = None,
 ) -> str:
     """
     서울시 자치구별 일별 유동인구 조회 (서울 열린데이터광장).
@@ -254,6 +254,7 @@ async def seoul_get_floating_population(
     Returns:
         JSON 문자열 — {date, area_filter, count, data:[{STDR_DE, SIGNGU_CD, SIGNGU_NM, TOT_LVPOP_CO}]}
     """
+    area_code = str(area_code) if area_code is not None else None
     try:
         key = _seoul_key()
     except ValueError as e:

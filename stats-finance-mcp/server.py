@@ -144,7 +144,7 @@ async def ecos_get_interest_rate(
     e = _ecos_date(end_date)
     item_suffix = f"/{item_code}" if item_code else ""
     url = (
-        f"{ECOS_BASE}/StatisticSearch/{key}/json/kr/1/10000"
+        f"{ECOS_BASE}/StatisticSearch/{key}/json/kr/1/200"
         f"/{stat_code}/{use_cycle}/{s}/{e}{item_suffix}"
     )
     try:
@@ -226,7 +226,7 @@ async def ecos_get_economic_indicator(
     use_cycle = cycle or default_cycle
 
     url = (
-        f"{ECOS_BASE}/StatisticSearch/{key}/json/kr/1/10000"
+        f"{ECOS_BASE}/StatisticSearch/{key}/json/kr/1/200"
         f"/{stat_code}/{use_cycle}/{start_date}/{end_date}"
     )
     try:
