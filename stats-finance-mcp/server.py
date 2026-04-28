@@ -31,6 +31,19 @@ def _dart_key() -> str:
 ECOS_BASE = "https://ecos.bok.or.kr/api"
 DART_BASE = "https://opendart.fss.or.kr/api"
 
+# YYYYMM → YYYYMMDD 자동 변환
+def _ecos_date(d: str) -> str:
+    return d + "01" if len(d) == 6 else d
+
+# stat_code별 기본 아이템코드+주기 매핑
+ECOS_ITEM_MAP = {
+    "722Y001": ("0101000", "D"),   # 기준금리
+    "817Y002": ("0000000", "D"),   # CD금리
+    "121Y006": ("BECBLA01", "M"),  # 예금은행 대출금리(신규)
+    "731Y003": ("5000000", "D"),   # 국고채 3년
+    "731Y005": ("5020000", "D"),   # 국고채 10년
+}
+
 
 async def _get(url: str, params: dict | None = None) -> dict:
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -125,9 +138,14 @@ async def ecos_get_interest_rate(
     except ValueError as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
+    item_code, default_cycle = ECOS_ITEM_MAP.get(stat_code, ("", "D"))
+    use_cycle = cycle if cycle != "MM" else default_cycle
+    s = _ecos_date(start_date)
+    e = _ecos_date(end_date)
+    item_suffix = f"/{item_code}" if item_code else ""
     url = (
         f"{ECOS_BASE}/StatisticSearch/{key}/json/kr/1/10000"
-        f"/{stat_code}/{cycle}/{start_date}/{end_date}"
+        f"/{stat_code}/{use_cycle}/{s}/{e}{item_suffix}"
     )
     try:
         data = await _get(url)
@@ -271,9 +289,14 @@ async def ecos_get_housing_loan_rate(start_date: str, end_date: str) -> str:
     series = []
     async with httpx.AsyncClient(timeout=30.0) as client:
         for stat_code, cyc, label in targets:
+            item_code, default_cycle = ECOS_ITEM_MAP.get(stat_code, ("", "D"))
+            use_cycle = cyc if cyc != "MM" else default_cycle
+            s = _ecos_date(start_date)
+            e = _ecos_date(end_date)
+            item_suffix = f"/{item_code}" if item_code else ""
             url = (
                 f"{ECOS_BASE}/StatisticSearch/{key}/json/kr/1/10000"
-                f"/{stat_code}/{cyc}/{start_date}/{end_date}"
+                f"/{stat_code}/{use_cycle}/{s}/{e}{item_suffix}"
             )
             try:
                 resp = await client.get(url)

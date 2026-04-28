@@ -124,13 +124,13 @@ async def rtms_get_apt_trade(
         items = root.findall(".//item")
         result = []
         for item in items:
-            name = _txt(item, "아파트")
-            area_str = _txt(item, "전용면적")
+            name = _txt(item, "aptNm")
+            area_str = _txt(item, "excluUseAr")
             try:
                 area = float(area_str)
             except ValueError:
                 area = 0.0
-            price_str = _txt(item, "거래금액").replace(",", "").strip()
+            price_str = _txt(item, "dealAmount").replace(",", "").strip()
             try:
                 price = int(price_str)
             except ValueError:
@@ -147,11 +147,11 @@ async def rtms_get_apt_trade(
                 "apt_name": name,
                 "area_m2": area,
                 "area_pyeong": round(area / 3.305785, 1),
-                "floor": _txt(item, "층"),
+                "floor": _txt(item, "floor"),
                 "price_만원": price,
-                "date": f"{_txt(item, '년')}-{_txt(item, '월').zfill(2)}-{_txt(item, '일').zfill(2)}",
-                "build_year": _txt(item, "건축년도"),
-                "dong": _txt(item, "법정동"),
+                "date": f"{_txt(item, 'dealYear')}-{_txt(item, 'dealMonth').zfill(2)}-{_txt(item, 'dealDay').zfill(2)}",
+                "build_year": _txt(item, "buildYear"),
+                "dong": _txt(item, "umdNm"),
             })
 
         result.sort(key=lambda x: x["price_만원"], reverse=True)
@@ -199,25 +199,25 @@ async def rtms_get_apt_rent(
         items = root.findall(".//item")
         result = []
         for item in items:
-            name = _txt(item, "아파트")
+            name = _txt(item, "aptNm")
             if apt_name and apt_name not in name:
                 continue
-            monthly = _txt(item, "월세금액").replace(",", "").strip()
+            monthly = _txt(item, "monthlyRent").replace(",", "").strip()
             rent_type = "월세" if monthly not in ("", "0") else "전세"
             try:
-                area = float(_txt(item, "전용면적"))
+                area = float(_txt(item, "excluUseAr"))
             except ValueError:
                 area = 0.0
             result.append({
                 "apt_name": name,
                 "area_m2": area,
                 "area_pyeong": round(area / 3.305785, 1),
-                "floor": _txt(item, "층"),
-                "deposit_만원": _txt(item, "보증금액").replace(",", "").strip(),
+                "floor": _txt(item, "floor"),
+                "deposit_만원": _txt(item, "deposit").replace(",", "").strip(),
                 "monthly_만원": monthly,
                 "rent_type": rent_type,
-                "date": f"{_txt(item, '년')}-{_txt(item, '월').zfill(2)}",
-                "dong": _txt(item, "법정동"),
+                "date": f"{_txt(item, 'dealYear')}-{_txt(item, 'dealMonth').zfill(2)}-{_txt(item, 'dealDay').zfill(2)}",
+                "dong": _txt(item, "umdNm"),
             })
 
         result = result[:limit]
@@ -261,23 +261,23 @@ async def rtms_get_apt_presale_transfer(
         items = root.findall(".//item")
         result = []
         for item in items:
-            price_str = _txt(item, "거래금액").replace(",", "").strip()
+            price_str = _txt(item, "dealAmount").replace(",", "").strip()
             try:
                 price = int(price_str)
             except ValueError:
                 price = 0
             try:
-                area = float(_txt(item, "전용면적"))
+                area = float(_txt(item, "excluUseAr"))
             except ValueError:
                 area = 0.0
             result.append({
-                "apt_name": _txt(item, "아파트"),
+                "apt_name": _txt(item, "aptNm"),
                 "area_m2": area,
                 "area_pyeong": round(area / 3.305785, 1),
-                "floor": _txt(item, "층"),
+                "floor": _txt(item, "floor"),
                 "price_만원": price,
-                "date": f"{_txt(item, '년')}-{_txt(item, '월').zfill(2)}-{_txt(item, '일').zfill(2)}",
-                "dong": _txt(item, "법정동"),
+                "date": f"{_txt(item, 'dealYear')}-{_txt(item, 'dealMonth').zfill(2)}-{_txt(item, 'dealDay').zfill(2)}",
+                "dong": _txt(item, "umdNm"),
             })
 
         result.sort(key=lambda x: x["price_만원"], reverse=True)

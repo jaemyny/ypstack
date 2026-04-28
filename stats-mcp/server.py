@@ -9,7 +9,7 @@ stats-mcp: 한국 인구/가구 통계 MCP 서버
 import json
 import os
 import time
-from typing import Optional
+from typing import Optional, Union
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -272,7 +272,7 @@ async def kosis_get_data(
 @mcp.tool(annotations=_ANNOT)
 async def kosis_get_population(
     region: Optional[str] = None,
-    year: Optional[str] = None,
+    year: Optional[Union[str, int]] = None,
 ) -> str:
     """
     KOSIS에서 시도별 주민등록인구 통계를 조회합니다 (tblId=DT_1B040A3).
@@ -281,6 +281,7 @@ async def kosis_get_population(
         region: 지역명 필터 (예: "서울", "경기", None=전체)
         year: 연도 필터 (예: "2023", None=전체)
     """
+    year = str(year) if year is not None else None
     err = _check_kosis_key()
     if err:
         return err
@@ -323,7 +324,7 @@ async def kosis_get_population(
 @mcp.tool(annotations=_ANNOT)
 async def kosis_get_household(
     region: Optional[str] = None,
-    year: Optional[str] = None,
+    year: Optional[Union[str, int]] = None,
 ) -> str:
     """
     KOSIS에서 시도별 가구 통계를 조회합니다 (tblId=DT_1B040B3).
@@ -332,6 +333,7 @@ async def kosis_get_household(
         region: 지역명 필터 (예: "서울", "부산", None=전체)
         year: 연도 필터 (예: "2023", None=전체)
     """
+    year = str(year) if year is not None else None
     err = _check_kosis_key()
     if err:
         return err
@@ -376,7 +378,7 @@ async def kosis_get_household_detail(
     region_code: str,
     age_code: Optional[str] = None,
     itm_id: Optional[str] = None,
-    year: Optional[str] = "2024",
+    year: Optional[Union[str, int]] = "2024",
 ) -> str:
     """
     KOSIS 가구주 연령×가구원수×시군구 교차 통계를 조회합니다 (tblId=DT_1JC1511).
@@ -388,6 +390,7 @@ async def kosis_get_household_detail(
         itm_id: 항목 ID (예: "T100"=전체가구, "T220"=2인가구, None=ALL)
         year: 기준 연도 (기본 "2024")
     """
+    year = str(year) if year is not None else "2024"
     err = _check_kosis_key()
     if err:
         return err
@@ -446,7 +449,7 @@ async def kosis_get_household_detail(
 async def sgis_get_region_stats(
     area_id: str,
     division: int = 2,
-    year: Optional[str] = "2024",
+    year: Optional[Union[str, int]] = "2024",
 ) -> str:
     """
     SGIS(통계지리정보서비스)에서 지역별 인구통계를 조회합니다.
@@ -456,6 +459,7 @@ async def sgis_get_region_stats(
         division: 행정구역 단위 (1=시도, 2=시군구, 3=읍면동, 기본 2)
         year: 기준 연도 (기본 "2024")
     """
+    year = str(year) if year is not None else "2024"
     if not SGIS_CONSUMER_KEY or not SGIS_CONSUMER_SECRET:
         return "SGIS_CONSUMER_KEY 또는 SGIS_CONSUMER_SECRET 환경변수가 설정되지 않았습니다."
 
