@@ -185,11 +185,11 @@ async def ecos_get_interest_rate(
 
 INDICATOR_MAP = {
     # (stat_code, ecos_cycle, item_code)  — ecos_cycle: M/D/Q/A
-    "CPI":    ("901Y009", "M", ""),    # 소비자물가지수 총지수 (월별)
-    "환율":   ("731Y001", "D", ""),    # 주요국 대원화환율 (일별, 원달러 포함)
-    "실업률": ("901Y027", "M", ""),    # 경제활동인구조사 (월별, 실업률/취업자 등 포함)
-    "GDP":    ("200Y001", "Q", ""),    # GDP 분기 (날짜 형식: YYYYMM01~YYYYMM31)
-    "통화량": ("101Y002", "M", "BBHS00"), # M2 광의통화 계절조정 (월별)
+    "CPI":    ("ECOS", "901Y009", "M", ""),    # 소비자물가지수 총지수 (월별)
+    "환율":   ("ECOS", "731Y001", "D", ""),    # 주요국 대원화환율 일별 (원달러 포함)
+    "실업률": ("ECOS", "901Y027", "M", ""),    # 경제활동인구조사 (월별)
+    "GDP":    ("ECOS", "200Y102", "Q", ""),    # GDP 분기성장률 계절조정 (날짜: YYYYQ1~YYYYQ4)
+    "통화량": ("KOSIS", "301", "DT_161Y009", "M"),  # M2 경제주체별 보유현황 평잔 계절조정 (KOSIS)
 }
 
 
@@ -226,15 +226,66 @@ async def ecos_get_economic_indicator(
             ensure_ascii=False,
         )
 
-    stat_code, default_cycle, item_code = INDICATOR_MAP[indicator]
+    entry = INDICATOR_MAP[indicator]
+    source = entry[0]
+
+    # ── 통화량(M2): KOSIS 경유 ──────────────────────────────────────
+    if source == "KOSIS":
+        kosis_key = os.environ.get("KOSIS_API_KEY", "")
+        if not kosis_key:
+            return json.dumps({"error": "KOSIS_API_KEY 환경변수가 설정되지 않았습니다."}, ensure_ascii=False)
+        _, org_id, tbl_id, kosis_cycle = entry
+        use_cycle = cycle or kosis_cycle
+        url = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
+        params = {
+            "method": "getList",
+            "apiKey": kosis_key,
+            "orgId": org_id,
+            "tblId": tbl_id,
+            "itmId": "ALL",
+            "objL1": "ALL",
+            "prdSe": use_cycle.upper(),
+            "startPrdDe": start_date,
+            "endPrdDe": end_date,
+            "format": "json",
+            "jsonVD": "Y",
+        }
+        try:
+            data = await _get(url, params)
+        except Exception as exc:
+            return json.dumps({"error": f"API 호출 실패: {exc}"}, ensure_ascii=False)
+        rows = data if isinstance(data, list) else []
+        records = [
+            {
+                "date":      r.get("PRD_DE", ""),
+                "item_name": r.get("ITM_NM", ""),
+                "value":     r.get("DT", ""),
+                "unit":      r.get("UNIT_NM", ""),
+            }
+            for r in rows
+        ]
+        return json.dumps({
+            "indicator": indicator,
+            "source": f"KOSIS {org_id}/{tbl_id}",
+            "period": f"{start_date} ~ {end_date}",
+            "count": len(records),
+            "data": records,
+        }, ensure_ascii=False, indent=2)
+
+    # ── ECOS 경유 ───────────────────────────────────────────────────
+    _, stat_code, default_cycle, item_code = entry
     use_cycle = cycle or default_cycle
 
-    # 주기별 날짜 포맷 변환
     def _fmt(d: str, cyc: str) -> str:
+        """ECOS 날짜 포맷 변환."""
         if cyc == "A" and len(d) >= 4:
             return d[:4]           # YYYYMM → YYYY (연간)
         if cyc == "D" and len(d) == 6:
             return d + "01"        # YYYYMM → YYYYMMDD (일별)
+        if cyc == "Q" and len(d) == 6:
+            year = d[:4]
+            q = (int(d[4:6]) - 1) // 3 + 1
+            return f"{year}Q{q}"   # YYYYMM → YYYYQn
         return d
 
     s = _fmt(start_date, use_cycle)
@@ -247,8 +298,8 @@ async def ecos_get_economic_indicator(
     )
     try:
         data = await _get(url)
-    except Exception as e:
-        return json.dumps({"error": f"API 호출 실패: {e}"}, ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"error": f"API 호출 실패: {exc}"}, ensure_ascii=False)
 
     rows = data.get("StatisticSearch", {}).get("row", [])
     if isinstance(rows, dict):
@@ -256,24 +307,23 @@ async def ecos_get_economic_indicator(
 
     records = [
         {
-            "date": r.get("TIME", ""),
+            "date":      r.get("TIME", ""),
             "stat_name": r.get("STAT_NAME", ""),
             "item_name": r.get("ITEM_NAME1", ""),
-            "value": r.get("DATA_VALUE", ""),
-            "unit": r.get("UNIT_NAME", ""),
+            "value":     r.get("DATA_VALUE", ""),
+            "unit":      r.get("UNIT_NAME", ""),
         }
         for r in rows
     ]
 
-    result = {
+    return json.dumps({
         "indicator": indicator,
         "stat_code": stat_code,
         "cycle": use_cycle,
         "period": f"{start_date} ~ {end_date}",
         "count": len(records),
         "data": records,
-    }
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    }, ensure_ascii=False, indent=2)
 
 
 # ---------------------------------------------------------------------------

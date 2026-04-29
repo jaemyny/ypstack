@@ -255,52 +255,41 @@ async def seoul_get_park_list(
     if not key:
         return "오류: SEOUL_API_KEY 환경변수가 설정되지 않았습니다."
 
-    # 서울 공원 API: searchParkInfo 또는 SeoulParkInfo 응답키 시도
-    url = f"{SEOUL_BASE}/{key}/json/searchParkInfo/1/1000/"
+    # 서울 공원 API: SearchParkInfoService (구 searchParkInfo 대체)
+    url = f"{SEOUL_BASE}/{key}/json/SearchParkInfoService/1/1000/"
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(url)
         resp.raise_for_status()
         data = resp.json()
 
-    # 응답 키 탐색 (searchParkInfo / SeoulParkInfo / row 직접)
-    rows = []
-    for root_key in ("searchParkInfo", "SeoulParkInfo", "RESULT"):
-        candidate = data.get(root_key, {})
-        if isinstance(candidate, dict):
-            rows = candidate.get("row", [])
-            if rows:
-                break
-    if not rows and isinstance(data, list):
-        rows = data
-
+    rows = data.get("SearchParkInfoService", {}).get("row", [])
     if not rows:
-        result_info = data.get("RESULT", {})
+        result_info = data.get("SearchParkInfoService", {}).get("RESULT", {})
         msg = result_info.get("MESSAGE", "공원 데이터가 없습니다.")
         return json.dumps({"error": msg, "raw_keys": list(data.keys())}, ensure_ascii=False, indent=2)
 
     parks = []
     for row in rows:
-        addr = row.get("P_ADDR", "")
-        p_type = row.get("P_LIST_CONTENT", "")
-        p_zone = row.get("P_ZONE", "")
-
-        if district and district not in addr and district not in p_zone:
-            continue
-        if park_type and park_type not in p_type:
+        addr    = row.get("PARK_ADDR", "")
+        rgn     = row.get("RGN", "")        # 자치구
+        # district 필터: 주소 또는 자치구 컬럼
+        if district and district not in addr and district not in rgn:
             continue
 
         parks.append({
-            "name": row.get("P_PARK", ""),
-            "address": addr,
-            "type": p_type,
-            "zone": p_zone,
-            "latitude": row.get("LATITUDE", ""),
-            "longitude": row.get("LONGITUDE", ""),
+            "name":      row.get("PARK_NM", ""),
+            "address":   addr,
+            "district":  rgn,
+            "area":      row.get("AREA", ""),
+            "open_date": row.get("OPEN_YMD", ""),
+            "tel":       row.get("TELNO", ""),
+            "latitude":  row.get("YCRD_G", ""),
+            "longitude": row.get("XCRD_G", ""),
         })
 
     result = {
         "district_filter": district,
-        "park_type_filter": park_type,
+        "total_parks_in_db": data.get("SearchParkInfoService", {}).get("list_total_count", 0),
         "count": len(parks),
         "parks": parks,
     }
