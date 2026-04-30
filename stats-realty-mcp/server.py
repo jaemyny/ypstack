@@ -32,6 +32,7 @@ KOSIS_BASE        = "https://kosis.kr/openapi"
 # ---------------------------------------------------------------------------
 try:
     from PublicDataReader import Kbland
+    import pandas as pd
     HAS_KBLAND = True
 except ImportError:
     HAS_KBLAND = False
@@ -536,6 +537,7 @@ async def kb_get_price_stats(
     period: Optional[int] = 12,
 ) -> str:
     """KB부동산 가격통계를 조회합니다 (PublicDataReader, API 키 불필요).
+    DEPRECATED: kb_get_price_index / kb_get_hai / kb_get_pir 개별 도구 사용을 권장합니다.
 
     Args:
         stat_type: 통계 유형 ("매매지수", "전세지수", "HAI", "PIR" 중 하나, 기본 "매매지수")
@@ -615,7 +617,724 @@ async def kb_get_price_stats(
 
 
 # ---------------------------------------------------------------------------
-# 도구 9: 법정동코드 조회 (내장)
+# KB부동산 공통 상수 · 헬퍼
+# ---------------------------------------------------------------------------
+
+_KB_CYCLE_CODE    = {"monthly": "01", "weekly": "02"}
+_KB_PROPERTY_CODE = {"APT": "01", "아파트": "01", "연립": "08", "단독": "09", "종합": "98"}
+_KB_DEAL_CODE     = {"매매": "01", "전세": "02"}
+_KB_AREA_CODE     = {"구분류": "01", "신분류": "02"}
+_KB_MARKET_CODE   = {
+    "매수우위": "01", "매매거래활발": "02", "전세수급": "03",
+    "전세거래활발": "04", "매매가격전망": "05", "전세가격전망": "06",
+}
+_KB_QUINTILE_CODE = {"APT평균": "01", "주택종합평균": "02", "APT㎡당": "08"}
+_KB_PIR_CODE      = {"PIR": "01", "J-PIR": "02"}
+
+_KB_REGION_HINT = {
+    "supported_codes": {
+        "11": "서울특별시", "21": "부산광역시", "22": "대구광역시",
+        "23": "인천광역시", "24": "광주광역시", "25": "대전광역시",
+        "26": "울산광역시", "29": "세종특별자치시",
+    },
+    "note": "경기(41/42), 강원, 충청, 전라, 경상 등 도단위는 KB API에서 미지원될 수 있습니다.",
+}
+
+
+def _kb_df_to_json(
+    df,
+    stat_type: str,
+    region_code: Optional[str] = None,
+    period: Optional[int] = None,
+) -> str:
+    """KB DataFrame → JSON (None/빈 DF 처리 + 지역·기간 클라이언트 필터)."""
+    if df is None:
+        return json.dumps(
+            {
+                "error": f"지역코드 '{region_code}'에 대한 KB 데이터를 불러오지 못했습니다. "
+                         "KB부동산 API는 광역시도 단위 일부만 지원합니다.",
+                **_KB_REGION_HINT,
+                "stat_type": stat_type,
+                "region_code": region_code,
+            },
+            ensure_ascii=False, indent=2,
+        )
+    if hasattr(df, "empty") and df.empty:
+        return json.dumps(
+            {"error": "데이터가 없습니다.", "stat_type": stat_type, "region_code": region_code},
+            ensure_ascii=False, indent=2,
+        )
+
+    # 지역코드 클라이언트 필터 (API가 지역코드를 무시할 경우 대응)
+    if region_code:
+        rcols = [c for c in df.columns if "지역코드" in c]
+        if rcols:
+            df = df[df[rcols[0]].astype(str).str.startswith(region_code.zfill(2))].copy()
+
+    # 날짜 기준 기간 필터 (API가 기간 파라미터를 무시할 경우 대응)
+    if period:
+        dcols = [c for c in df.columns if "날짜" in c or "date" in c.lower() or "ym" in c.lower()]
+        if dcols:
+            dc = dcols[0]
+            df[dc] = pd.to_datetime(df[dc], errors="coerce")
+            cutoff = pd.Timestamp.now() - pd.DateOffset(months=period)
+            df = df[df[dc] >= cutoff].copy()
+            df[dc] = df[dc].dt.strftime("%Y-%m")
+
+    result = json.loads(df.to_json(orient="records", force_ascii=False))
+    return json.dumps(
+        {
+            "stat_type": stat_type,
+            "region_code": region_code,
+            "period_months": period,
+            "count": len(result),
+            "data": result,
+        },
+        ensure_ascii=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 10: 가격지수
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_price_index(
+    cycle: str = "monthly",
+    property_type: str = "APT",
+    deal_type: str = "매매",
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 주택가격지수를 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 1~8, 주간 3~4
+
+    Args:
+        cycle: 주기 ("monthly"=월간, "weekly"=주간, 기본 "monthly")
+        property_type: 매물종별 ("APT", "연립", "단독", "종합", 기본 "APT")
+              ※ APT 외 매물종별은 월간 데이터만 지원됩니다.
+        deal_type: 거래유형 ("매매" 또는 "전세", 기본 "매매")
+        region_code: 지역코드 (예: "11"=서울, 기본 "11")
+        period: 최근 N개월·회차 (기본 12)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    cycle_c = _KB_CYCLE_CODE.get(cycle)
+    if not cycle_c:
+        return json.dumps({"error": f"지원하지 않는 cycle: {cycle}. ('monthly' 또는 'weekly')"}, ensure_ascii=False, indent=2)
+    prop_c = _KB_PROPERTY_CODE.get(property_type)
+    if not prop_c:
+        return json.dumps({"error": f"지원하지 않는 property_type: {property_type}. ('APT','연립','단독','종합')"}, ensure_ascii=False, indent=2)
+    deal_c = _KB_DEAL_CODE.get(deal_type)
+    if not deal_c:
+        return json.dumps({"error": f"지원하지 않는 deal_type: {deal_type}. ('매매' 또는 '전세')"}, ensure_ascii=False, indent=2)
+    try:
+        api = Kbland()
+        df = api.get_price_index(
+            월간주간구분코드=cycle_c,
+            매물종별구분=prop_c,
+            매매전세코드=deal_c,
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, f"가격지수({cycle}/{property_type}/{deal_type})", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 11: 가격지수 증감률
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_price_index_change_rate(
+    cycle: str = "weekly",
+    property_type: str = "APT",
+    deal_type: str = "매매",
+    region_code: str = "11",
+    period: Optional[int] = 8,
+) -> str:
+    """KB부동산 주택가격지수 증감률을 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 주간 1~2
+
+    Args:
+        cycle: 주기 ("monthly"=월간, "weekly"=주간, 기본 "weekly")
+        property_type: 매물종별 ("APT", "연립", "단독", "종합", 기본 "APT")
+        deal_type: 거래유형 ("매매" 또는 "전세", 기본 "매매")
+        region_code: 지역코드 (예: "11"=서울, 기본 "11")
+        period: 최근 N회차·개월 (기본 8; 클라이언트 날짜 필터 적용)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    cycle_c = _KB_CYCLE_CODE.get(cycle)
+    if not cycle_c:
+        return json.dumps({"error": f"지원하지 않는 cycle: {cycle}."}, ensure_ascii=False, indent=2)
+    prop_c = _KB_PROPERTY_CODE.get(property_type)
+    if not prop_c:
+        return json.dumps({"error": f"지원하지 않는 property_type: {property_type}."}, ensure_ascii=False, indent=2)
+    deal_c = _KB_DEAL_CODE.get(deal_type)
+    if not deal_c:
+        return json.dumps({"error": f"지원하지 않는 deal_type: {deal_type}."}, ensure_ascii=False, indent=2)
+    try:
+        api = Kbland()
+        df = api.get_price_index_change_rate(
+            월간주간구분코드=cycle_c,
+            매물종별구분=prop_c,
+            매매전세코드=deal_c,
+            지역코드=region_code,
+        )
+        return _kb_df_to_json(df, f"가격지수증감률({cycle}/{property_type}/{deal_type})", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 12: 면적별 가격지수
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_price_index_by_area(
+    cycle: str = "monthly",
+    property_type: str = "APT",
+    area_type: str = "신분류",
+    deal_type: str = "매매",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 전용면적별 주택가격지수를 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 31·35(구분류), 39~40(신분류)
+
+    Args:
+        cycle: 주기 ("monthly"=월간, "weekly"=주간, 기본 "monthly")
+        property_type: 매물종별 ("APT", "연립", "단독", "종합", 기본 "APT")
+        area_type: 면적 분류 ("구분류" 또는 "신분류", 기본 "신분류")
+        deal_type: 거래유형 ("매매" 또는 "전세", 기본 "매매")
+        period: 최근 N개월 (기본 12; 기간 파라미터로 API에 직접 전달됨)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    cycle_c = _KB_CYCLE_CODE.get(cycle)
+    prop_c = _KB_PROPERTY_CODE.get(property_type)
+    area_c = _KB_AREA_CODE.get(area_type)
+    deal_c = _KB_DEAL_CODE.get(deal_type)
+    if not cycle_c:
+        return json.dumps({"error": f"지원하지 않는 cycle: {cycle}."}, ensure_ascii=False, indent=2)
+    if not prop_c:
+        return json.dumps({"error": f"지원하지 않는 property_type: {property_type}."}, ensure_ascii=False, indent=2)
+    if not area_c:
+        return json.dumps({"error": f"지원하지 않는 area_type: {area_type}. ('구분류' 또는 '신분류')"}, ensure_ascii=False, indent=2)
+    if not deal_c:
+        return json.dumps({"error": f"지원하지 않는 deal_type: {deal_type}."}, ensure_ascii=False, indent=2)
+    try:
+        api = Kbland()
+        df = api.get_price_index_by_area(
+            월간주간구분코드=cycle_c,
+            매물종별구분=prop_c,
+            면적별코드=area_c,
+            매매전세코드=deal_c,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, f"면적별가격지수({area_type}/{deal_type})", None, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 13: 평균가격
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_average_price(
+    property_type: str = "APT",
+    deal_type: str = "매매",
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 평균 매매·전세가를 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 41~42
+
+    Args:
+        property_type: 매물종별 ("APT", "연립", "단독", "종합", 기본 "APT")
+        deal_type: 거래유형 ("매매" 또는 "전세", 기본 "매매")
+        region_code: 지역코드 (예: "11"=서울, 기본 "11"; 클라이언트 필터 적용)
+        period: 최근 N개월 (기본 12; 클라이언트 날짜 필터 적용)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    prop_c = _KB_PROPERTY_CODE.get(property_type)
+    deal_c = _KB_DEAL_CODE.get(deal_type)
+    if not prop_c:
+        return json.dumps({"error": f"지원하지 않는 property_type: {property_type}."}, ensure_ascii=False, indent=2)
+    if not deal_c:
+        return json.dumps({"error": f"지원하지 않는 deal_type: {deal_type}."}, ensure_ascii=False, indent=2)
+    try:
+        api = Kbland()
+        df = api.get_average_price(
+            매물종별구분=prop_c,
+            매매전세코드=deal_c,
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, f"평균가격({property_type}/{deal_type})", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 14: 면적별 평균가격
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_average_price_by_area(
+    deal_type: str = "매매",
+    area_type: str = "신분류",
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 전용면적별 평균 매매·전세가를 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 32~38 (구분류), 55~58 (신분류)
+
+    Args:
+        deal_type: 거래유형 ("매매" 또는 "전세", 기본 "매매")
+        area_type: 면적 분류 ("구분류" 또는 "신분류", 기본 "신분류")
+        region_code: 지역코드 (예: "11"=서울, 기본 "11"; 클라이언트 필터 적용)
+        period: 최근 N개월 (기본 12; 클라이언트 날짜 필터 적용)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    deal_c = _KB_DEAL_CODE.get(deal_type)
+    area_c = _KB_AREA_CODE.get(area_type)
+    if not deal_c:
+        return json.dumps({"error": f"지원하지 않는 deal_type: {deal_type}."}, ensure_ascii=False, indent=2)
+    if not area_c:
+        return json.dumps({"error": f"지원하지 않는 area_type: {area_type}. ('구분류' 또는 '신분류')"}, ensure_ascii=False, indent=2)
+    try:
+        api = Kbland()
+        df = api.get_average_price_by_area(
+            매매전세코드=deal_c,
+            면적별코드=area_c,
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, f"면적별평균가격({area_type}/{deal_type})", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 15: 5분위 평균가격
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_average_price_by_quintile(
+    menu_type: str = "APT평균",
+    deal_type: str = "매매",
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 5분위 평균 매매·전세가를 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 51~54
+
+    Args:
+        menu_type: 메뉴 ("APT평균", "주택종합평균", "APT㎡당", 기본 "APT평균")
+        deal_type: 거래유형 ("매매" 또는 "전세", 기본 "매매")
+        region_code: 지역코드 (예: "11"=서울, 기본 "11"; 클라이언트 필터 적용)
+        period: 최근 N개월 (기본 12; 클라이언트 날짜 필터 적용)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    menu_c = _KB_QUINTILE_CODE.get(menu_type)
+    deal_c = _KB_DEAL_CODE.get(deal_type)
+    if not menu_c:
+        return json.dumps({"error": f"지원하지 않는 menu_type: {menu_type}. ('APT평균','주택종합평균','APT㎡당')"}, ensure_ascii=False, indent=2)
+    if not deal_c:
+        return json.dumps({"error": f"지원하지 않는 deal_type: {deal_type}."}, ensure_ascii=False, indent=2)
+    try:
+        api = Kbland()
+        df = api.get_average_price_by_quintile(
+            메뉴코드=menu_c,
+            매매전세코드=deal_c,
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, f"5분위평균가격({menu_type}/{deal_type})", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 16: ㎡당 평균가격
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_average_price_per_squaremeter(
+    property_type: str = "APT",
+    deal_type: str = "매매",
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 ㎡당 평균 매매·전세가를 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 45~50
+
+    Args:
+        property_type: 매물종별 ("APT", "연립", "단독", "종합", 기본 "APT")
+        deal_type: 거래유형 ("매매" 또는 "전세", 기본 "매매")
+        region_code: 지역코드 (예: "11"=서울, 기본 "11"; 클라이언트 필터 적용)
+        period: 최근 N개월 (기본 12; 클라이언트 날짜 필터 적용)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    prop_c = _KB_PROPERTY_CODE.get(property_type)
+    deal_c = _KB_DEAL_CODE.get(deal_type)
+    if not prop_c:
+        return json.dumps({"error": f"지원하지 않는 property_type: {property_type}."}, ensure_ascii=False, indent=2)
+    if not deal_c:
+        return json.dumps({"error": f"지원하지 않는 deal_type: {deal_type}."}, ensure_ascii=False, indent=2)
+    try:
+        api = Kbland()
+        df = api.get_average_price_per_squaremeter(
+            매물종별구분=prop_c,
+            매매전세코드=deal_c,
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, f"㎡당평균가격({property_type}/{deal_type})", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 17: 중위가격
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_median_price(
+    property_type: str = "APT",
+    deal_type: str = "매매",
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 중위 매매·전세가를 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 43~44
+
+    Args:
+        property_type: 매물종별 ("APT", "연립", "단독", "종합", 기본 "APT")
+        deal_type: 거래유형 ("매매" 또는 "전세", 기본 "매매")
+        region_code: 지역코드 (예: "11"=서울, 기본 "11"; 클라이언트 필터 적용)
+        period: 최근 N개월 (기본 12; 클라이언트 날짜 필터 적용)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    prop_c = _KB_PROPERTY_CODE.get(property_type)
+    deal_c = _KB_DEAL_CODE.get(deal_type)
+    if not prop_c:
+        return json.dumps({"error": f"지원하지 않는 property_type: {property_type}."}, ensure_ascii=False, indent=2)
+    if not deal_c:
+        return json.dumps({"error": f"지원하지 않는 deal_type: {deal_type}."}, ensure_ascii=False, indent=2)
+    try:
+        api = Kbland()
+        df = api.get_median_price(
+            매물종별구분=prop_c,
+            매매전세코드=deal_c,
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, f"중위가격({property_type}/{deal_type})", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 18: KB 아파트 월세지수
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_wolse_index(
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 월간 아파트 월세가격지수를 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 9
+
+    Args:
+        region_code: 지역코드 (예: "11"=서울, 기본 "11"; 클라이언트 필터 적용)
+        period: 최근 N개월 (기본 12; 클라이언트 날짜 필터 적용)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    try:
+        api = Kbland()
+        df = api.get_monthly_apartment_wolse_index(
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, "월세지수", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 19: PIR 및 J-PIR
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_pir(
+    pir_type: str = "PIR",
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 PIR(소득 대비 주택가격비율) 및 J-PIR을 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 11~12
+
+    Args:
+        pir_type: PIR 유형 ("PIR" 또는 "J-PIR", 기본 "PIR")
+        region_code: 지역코드 (예: "11"=서울, 기본 "11")
+        period: 최근 N개월 (기본 12)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    pir_c = _KB_PIR_CODE.get(pir_type)
+    if not pir_c:
+        return json.dumps({"error": f"지원하지 않는 pir_type: {pir_type}. ('PIR' 또는 'J-PIR')"}, ensure_ascii=False, indent=2)
+    try:
+        api = Kbland()
+        df = api.get_pir(
+            pir_c,
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, f"PIR({pir_type})", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 20: KB 아파트 주택담보대출 PIR
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_mortgage_loan_pir(
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 아파트 주택담보대출 PIR을 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 13
+
+    Args:
+        region_code: 지역코드 (예: "11"=서울, 기본 "11"; 클라이언트 필터 적용)
+        period: 최근 N개월 (기본 12; 기간 파라미터로 API에 직접 전달됨)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    try:
+        api = Kbland()
+        df = api.get_apartment_mortgage_loan_pir(
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, "주택담보대출PIR", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 21: HAI (주택구매력지수)
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_hai(
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 HAI(주택구매력지수)를 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 14
+
+    Args:
+        region_code: 지역코드 (예: "11"=서울, 기본 "11")
+        period: 최근 N개월 (기본 12)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    try:
+        api = Kbland()
+        df = api.get_hai(
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, "HAI(주택구매력지수)", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 22: KB-HOI (주택구입잠재력지수)
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_hoi(
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 KB-HOI(주택구입잠재력지수)를 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 15
+
+    Args:
+        region_code: 지역코드 (예: "11"=서울, 기본 "11"; 클라이언트 필터 적용)
+        period: 최근 N개월 (기본 12; 기간 파라미터로 API에 직접 전달됨)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    try:
+        api = Kbland()
+        df = api.get_kb_housing_purchase_potential_index(
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, "KB-HOI(주택구입잠재력지수)", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 23: KB선도아파트50 지수
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_lead50(
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 KB선도아파트50 지수를 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 16
+
+    Args:
+        region_code: 지역코드 (예: "11"=서울, 기본 "11"; 클라이언트 필터 적용)
+        period: 최근 N개월 (기본 12; 클라이언트 날짜 필터 적용)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    try:
+        api = Kbland()
+        df = api.get_lead_apartment_50_index(
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, "KB선도아파트50지수", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 24: 시장동향/설문조사
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_market_trend(
+    trend_type: str = "매수우위",
+    cycle: str = "monthly",
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 시장동향·설문조사 지수를 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 21~26, 주간 5~8
+
+    Args:
+        trend_type: 지수 유형 ("매수우위", "매매거래활발", "전세수급", "전세거래활발",
+                    "매매가격전망", "전세가격전망", 기본 "매수우위")
+                    ※ 가격전망지수(매매·전세)는 월간만 지원됩니다.
+        cycle: 주기 ("monthly"=월간, "weekly"=주간, 기본 "monthly")
+        region_code: 지역코드 (예: "11"=서울, 기본 "11"; 클라이언트 필터 적용)
+        period: 최근 N개월·회차 (기본 12; 기간 파라미터로 API에 직접 전달됨)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    trend_c = _KB_MARKET_CODE.get(trend_type)
+    cycle_c = _KB_CYCLE_CODE.get(cycle)
+    if not trend_c:
+        return json.dumps(
+            {"error": f"지원하지 않는 trend_type: {trend_type}.",
+             "options": list(_KB_MARKET_CODE.keys())},
+            ensure_ascii=False, indent=2,
+        )
+    if not cycle_c:
+        return json.dumps({"error": f"지원하지 않는 cycle: {cycle}."}, ensure_ascii=False, indent=2)
+    try:
+        api = Kbland()
+        df = api.get_market_trend(
+            메뉴코드=trend_c,
+            월간주간구분코드=cycle_c,
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, f"시장동향/{trend_type}({cycle})", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 25: 전세가격비율
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_jeonse_price_ratio(
+    property_type: str = "APT",
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 매매 대비 전세가격비율을 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 27~30
+
+    Args:
+        property_type: 매물종별 ("APT", "연립", "단독", "종합", 기본 "APT")
+        region_code: 지역코드 (예: "11"=서울, 기본 "11")
+        period: 최근 N개월 (기본 12; 클라이언트 날짜 필터 적용)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    prop_c = _KB_PROPERTY_CODE.get(property_type)
+    if not prop_c:
+        return json.dumps({"error": f"지원하지 않는 property_type: {property_type}."}, ensure_ascii=False, indent=2)
+    try:
+        api = Kbland()
+        df = api.get_jeonse_price_ratio(
+            매물종별구분=prop_c,
+            지역코드=region_code,
+        )
+        return _kb_df_to_json(df, f"전세가격비율({property_type})", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# KB 도구 26: 전월세 전환율
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_jeonwolse_conversion_rate(
+    region_code: str = "11",
+    period: Optional[int] = 12,
+) -> str:
+    """KB부동산 전월세 전환율을 조회합니다 (PublicDataReader, API 키 불필요).
+    엑셀 매핑: 월간 59
+
+    Args:
+        region_code: 지역코드 (예: "11"=서울, 기본 "11"; 클라이언트 필터 적용)
+        period: 최근 N개월 (기본 12; 클라이언트 날짜 필터 적용)
+    """
+    if not HAS_KBLAND:
+        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
+    try:
+        api = Kbland()
+        df = api.get_jeonwolse_conversion_rate(
+            지역코드=region_code,
+            기간=str(period) if period else "12",
+        )
+        return _kb_df_to_json(df, "전월세전환율", region_code, period)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# 도구 27: 법정동코드 조회 (내장)
 # ---------------------------------------------------------------------------
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
