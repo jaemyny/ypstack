@@ -590,6 +590,99 @@ async def dart_get_financial_statement(
 
 
 # ---------------------------------------------------------------------------
+# 도구 8: kosis_get_stock_index
+# ---------------------------------------------------------------------------
+
+# KOSIS 한국거래소(orgId=343) 주요 주가지수 테이블
+_KOSIS_KRX_TBL = {
+    "KOSPI":    ("343", "DT_343_2010_S0029"),   # KOSPI 종합주가지수 (월별)
+    "KOSDAQ":   ("343", "DT_343_2010_S0034"),   # KOSDAQ 종합주가지수 (월별)
+    "PER":      ("343", "DT_343_2010_S0033"),   # KOSPI PER (월별)
+    "배당수익률": ("343", "DT_343_2010_S0032"),  # KOSPI 배당수익률 (월별)
+}
+
+
+@mcp.tool()
+async def kosis_get_stock_index(
+    index_type: str = "KOSPI",
+    start_date: str = "202401",
+    end_date: str = "202512",
+) -> str:
+    """
+    KOSIS(한국거래소) 주가지수 조회. KRX 직접 API 대체.
+
+    지원 index_type:
+      KOSPI     = KOSPI 종합주가지수 (월별)
+      KOSDAQ    = KOSDAQ 종합주가지수 (월별)
+      PER       = KOSPI PER (월별)
+      배당수익률 = KOSPI 배당수익률 (월별)
+
+    Args:
+        index_type: 지수 유형 (기본 "KOSPI")
+        start_date: 시작 연월 YYYYMM (기본 "202401")
+        end_date:   종료 연월 YYYYMM (기본 "202512")
+
+    Returns:
+        JSON 문자열 — {index_type, period, count, data:[{date, value, unit}]}
+    """
+    kosis_key = os.environ.get("KOSIS_API_KEY", "")
+    if not kosis_key:
+        return json.dumps({"error": "KOSIS_API_KEY 환경변수가 설정되지 않았습니다."}, ensure_ascii=False)
+
+    if index_type not in _KOSIS_KRX_TBL:
+        return json.dumps(
+            {
+                "error": f"지원하지 않는 index_type: {index_type}",
+                "supported": list(_KOSIS_KRX_TBL.keys()),
+            },
+            ensure_ascii=False,
+        )
+
+    org_id, tbl_id = _KOSIS_KRX_TBL[index_type]
+    url = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
+    params = {
+        "method": "getList",
+        "apiKey": kosis_key,
+        "orgId": org_id,
+        "tblId": tbl_id,
+        "itmId": "ALL",
+        "objL1": "ALL",
+        "prdSe": "M",
+        "startPrdDe": start_date,
+        "endPrdDe": end_date,
+        "format": "json",
+        "jsonVD": "Y",
+    }
+    try:
+        data = await _get(url, params)
+    except Exception as exc:
+        return json.dumps({"error": f"API 호출 실패: {exc}"}, ensure_ascii=False)
+
+    rows = data if isinstance(data, list) else []
+    records = [
+        {
+            "date":      r.get("PRD_DE", ""),
+            "item_name": r.get("ITM_NM", ""),
+            "value":     r.get("DT", ""),
+            "unit":      r.get("UNIT_NM", ""),
+        }
+        for r in rows
+    ]
+
+    return json.dumps(
+        {
+            "index_type": index_type,
+            "source": f"KOSIS {org_id}/{tbl_id}",
+            "period": f"{start_date} ~ {end_date}",
+            "count": len(records),
+            "data": records,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+# ---------------------------------------------------------------------------
 # 엔트리포인트
 # ---------------------------------------------------------------------------
 

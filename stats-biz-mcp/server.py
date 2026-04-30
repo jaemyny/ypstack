@@ -3,7 +3,6 @@ stats-biz-mcp: 소상공인 상가정보 + 서울 유동인구 + 한국부동산
 """
 import json
 import os
-from collections import Counter
 from typing import Optional, Union
 
 import httpx
@@ -37,6 +36,11 @@ def _reb_key() -> str:
 
 
 SEMAS_BASE = "http://apis.data.go.kr/B553077/api/open/sdsc2/storeList"
+_SEMAS_DEPRECATED_MSG = (
+    "소상공인 상가정보 API(B553077)가 서비스 종료되어 데이터를 불러올 수 없습니다. "
+    "소상공인시장진흥공단 빅데이터(bigdata.sbiz.or.kr)에서 시각화 서비스는 이용 가능합니다. "
+    "JSON 데이터 API 대체 여부는 현재 확인 중입니다."
+)
 
 
 async def _get(url: str, params: dict | None = None) -> dict:
@@ -90,36 +94,11 @@ async def semas_search_stores_by_district(
     Returns:
         JSON 문자열 — {bjdong_cd, industry_filter, count, stores:[{bizesNm, indsLclsNm, indsMclsNm, lnoAdr, lat, lon}]}
     """
-    try:
-        key = _data_go_key()
-    except ValueError as e:
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
-
-    params = {
-        "serviceKey": key,
-        "divId": "bjdongCd",
-        "key": bjdong_cd,
-        "pageNo": 1,
-        "numOfRows": limit,
-    }
-    try:
-        data = await _get(SEMAS_BASE, params)
-    except Exception as e:
-        return json.dumps({"error": f"API 호출 실패: {e}"}, ensure_ascii=False)
-
-    items = _parse_semas_items(data)
-
-    if industry_class:
-        items = [i for i in items if industry_class in i.get("indsLclsNm", "")]
-
-    stores = [_format_store(r) for r in items]
-    result = {
-        "bjdong_cd": bjdong_cd,
-        "industry_filter": industry_class,
-        "count": len(stores),
-        "stores": stores,
-    }
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    return json.dumps(
+        {"error": _SEMAS_DEPRECATED_MSG, "bjdong_cd": bjdong_cd},
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -141,51 +120,11 @@ async def semas_get_store_stats_by_region(
     Returns:
         JSON 문자열 — {bjdong_cd, total_stores, top_industries:[{industry, count, ratio_pct}]}
     """
-    try:
-        key = _data_go_key()
-    except ValueError as e:
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
-
-    params = {
-        "serviceKey": key,
-        "divId": "bjdongCd",
-        "key": bjdong_cd,
-        "pageNo": 1,
-        "numOfRows": 1000,
-    }
-    try:
-        data = await _get(SEMAS_BASE, params)
-    except Exception as e:
-        return json.dumps({"error": f"API 호출 실패: {e}"}, ensure_ascii=False)
-
-    items = _parse_semas_items(data)
-    total = len(items)
-
-    if total == 0:
-        return json.dumps(
-            {"bjdong_cd": bjdong_cd, "total_stores": 0, "top_industries": []},
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    counter = Counter(i.get("indsLclsNm", "알수없음") for i in items)
-    top = counter.most_common(top_n)
-
-    top_industries = [
-        {
-            "industry": name,
-            "count": cnt,
-            "ratio_pct": round(cnt / total * 100, 2),
-        }
-        for name, cnt in top
-    ]
-
-    result = {
-        "bjdong_cd": bjdong_cd,
-        "total_stores": total,
-        "top_industries": top_industries,
-    }
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    return json.dumps(
+        {"error": _SEMAS_DEPRECATED_MSG, "bjdong_cd": bjdong_cd},
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -207,32 +146,11 @@ async def semas_search_commercial_area(
     Returns:
         JSON 문자열 — {area_name, count, stores:[{bizesNm, indsLclsNm, indsMclsNm, lnoAdr, lat, lon}]}
     """
-    try:
-        key = _data_go_key()
-    except ValueError as e:
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
-
-    params = {
-        "serviceKey": key,
-        "divId": "stgNm",
-        "key": area_name,
-        "pageNo": 1,
-        "numOfRows": limit,
-    }
-    try:
-        data = await _get(SEMAS_BASE, params)
-    except Exception as e:
-        return json.dumps({"error": f"API 호출 실패: {e}"}, ensure_ascii=False)
-
-    items = _parse_semas_items(data)
-    stores = [_format_store(r) for r in items]
-
-    result = {
-        "area_name": area_name,
-        "count": len(stores),
-        "stores": stores,
-    }
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    return json.dumps(
+        {"error": _SEMAS_DEPRECATED_MSG, "area_name": area_name},
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 # ---------------------------------------------------------------------------
