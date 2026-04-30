@@ -244,6 +244,9 @@ async def kosis_get_data(
         end_period: 종료 기간 (예: "2024", "202412")
         limit: 최대 결과 수 (기본 100)
     """
+    # MCP 런타임이 숫자를 int로 전달하는 경우 대비
+    start_period = str(start_period) if start_period is not None else None
+    end_period = str(end_period) if end_period is not None else None
     err = _check_kosis_key()
     if err:
         return err
@@ -408,7 +411,10 @@ async def kosis_get_household_detail(
     5자리 이상 시군구 코드는 자동으로 앞 2자리로 변환됩니다.
 
     Args:
-        region_code: 시도 코드 2자리 (예: "11"=서울, "26"=부산, "41"=경기)
+        region_code: 시도 코드 2자리.
+        표준 코드: "11"=서울, "21"=부산, "22"=대구, "23"=인천, "24"=광주,
+        "25"=대전, "26"=울산, "29"=세종, "31"=경기, "32"=강원, "33"=충북,
+        "34"=충남, "35"=전북, "36"=전남, "37"=경북, "38"=경남, "39"=제주
         age_code: 연령 코드 (예: "035"=30~34세, "040"=35~39세, "000"=합계, None=ALL)
         itm_id: 항목 ID (예: "T100"=일반가구, None=ALL). 합계 비교 시 "T100" 권장.
         year: 기준 연도 (기본 "2024")

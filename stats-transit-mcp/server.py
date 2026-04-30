@@ -74,10 +74,11 @@ async def seoul_get_subway_ridership(
     line: Optional[str] = None,
 ) -> str:
     """전국 지하철 노선별 연간 수송인원 통계 조회 (KOSIS).
+    ※ 이 도구는 노선(호선) 단위 연간 통계를 반환합니다. 특정 역의 승하차 인원은 지원하지 않습니다.
 
     Args:
         year: 조회 연도 (YYYY, 예: "2023")
-        line: 호선 필터 (선택, 예: "1호선", "2호선", "합계")
+        line: 호선 필터 (선택, 예: "1호선", "2호선", "합계"). 미입력 시 전체 노선 반환.
     """
     key = _get_kosis_key()
     if not key:
@@ -190,7 +191,17 @@ async def seoul_get_bus_route_info(bus_number: str) -> str:
 
     rows = data.get("busRouteList", {}).get("row", [])
     if not rows:
-        return json.dumps({"error": "해당 버스 노선을 찾을 수 없습니다.", "bus_number": bus_number}, ensure_ascii=False, indent=2)
+        result_msg = data.get("busRouteList", {}).get("RESULT", {}).get("MESSAGE", "")
+        return json.dumps({
+            "error": "해당 버스 노선을 찾을 수 없습니다.",
+            "bus_number": bus_number,
+            "api_message": result_msg,
+            "hint": (
+                "서울 버스 노선번호를 정확히 입력하세요 (예: '370', '9714', '146'). "
+                "광역버스(M)·공항버스 등은 지원하지 않을 수 있습니다. "
+                "노선 정보는 서울 열린데이터광장(data.seoul.go.kr)에서 직접 확인 가능합니다."
+            ),
+        }, ensure_ascii=False, indent=2)
 
     routes = []
     for row in rows:
@@ -220,7 +231,9 @@ async def kosis_get_transit_stats(
     """KOSIS 교통 관련 통계표 검색.
 
     Args:
-        keyword: 검색 키워드 (예: "교통", "지하철", "버스", "교통량")
+        keyword: 검색 키워드 (예: "교통", "지하철", "도시철도", "자동차등록", "도로현황", "항공")
+                 ※ "철도", "버스" 단독 키워드는 결과가 없을 수 있습니다.
+                   "도시철도" 또는 "자동차등록" 등 구체적인 키워드를 사용하세요.
         year: 기준 연도 (선택, 예: "2023")
         region: 지역명 (선택, 예: "서울", "경기")
     """
@@ -234,12 +247,12 @@ async def kosis_get_transit_stats(
     if region:
         search_kwd += f" {region}"
 
-    url = f"{KOSIS_BASE}/statisticsList.do"
+    url = f"{KOSIS_BASE}/statisticsSearch.do"
     params = {
         "method": "getList",
         "apiKey": key,
         "vwCd": "MT_ZTITLE",
-        "parentListId": "K",
+        "parentListId": "",
         "searchNm": search_kwd,
         "format": "json",
         "jsonVD": "Y",

@@ -317,23 +317,27 @@ async def kosis_get_env_stats(
     """KOSIS 환경 관련 통계표 검색.
 
     Args:
-        keyword: 검색 키워드 (예: "환경", "대기오염", "수질", "폐기물", "녹지", "온실가스")
+        keyword: 검색 키워드 (예: "환경", "대기오염", "수질", "폐기물", "녹지", "기후변화", "탄소")
+                 ※ "온실가스"는 KOSIS에 등록된 표제어가 아닙니다 — "기후변화" 또는 "탄소"로 검색하세요.
         year: 기준 연도 (선택, 예: "2023")
     """
     key = _get_kosis_key()
     if not key:
         return "오류: KOSIS_API_KEY 환경변수가 설정되지 않았습니다."
 
+    # MCP 런타임이 year를 int로 전달하는 경우 대비
+    year = str(year) if year is not None else None
+
     search_kwd = keyword
     if year:
         search_kwd += f" {year}"
 
-    url = f"{KOSIS_BASE}/statisticsList.do"
+    url = f"{KOSIS_BASE}/statisticsSearch.do"
     params = {
         "method": "getList",
         "apiKey": key,
         "vwCd": "MT_ZTITLE",
-        "parentListId": "K",
+        "parentListId": "",
         "searchNm": search_kwd,
         "format": "json",
         "jsonVD": "Y",

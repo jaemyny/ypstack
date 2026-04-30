@@ -304,6 +304,14 @@ async def ecos_get_economic_indicator(
     _, stat_code, default_cycle, item_code, _filters = (*entry, [])[:5]
     use_cycle = cycle or default_cycle
 
+    # 분기(Q) 조회 시 연도 단독 입력(4자리) → YYYYMM 자동 변환
+    # 예: start_date="2023" → "202301", end_date="2024" → "202412"
+    if use_cycle == "Q":
+        if len(str(start_date)) == 4:
+            start_date = str(start_date) + "01"
+        if len(str(end_date)) == 4:
+            end_date = str(end_date) + "12"
+
     def _fmt(d: str, cyc: str) -> str:
         """ECOS 날짜 포맷 변환."""
         if cyc == "A" and len(d) >= 4:
