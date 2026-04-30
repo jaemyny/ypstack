@@ -240,6 +240,7 @@ async def kosis_get_business_count(
             tbl_id="DT_1K52F08",
             itm_id="ALL",
             obj_l1="ALL",
+            obj_l2="ALL",   # ★ 산업 분류(필수). 미입력 시 KOSIS 오류 20 발생
             prd_se="Y",
             year=year,
         )
@@ -247,11 +248,16 @@ async def kosis_get_business_count(
         return str(e)
 
     rows = _filter_by_region(rows, region)
+    # 기본은 "전체 산업" 합계만 — verbose 옵션이 없으므로 핵심만 표시
+    summary_rows = [r for r in rows if r.get("C2_NM", "") in ("전체 산업", "0", "")]
+    if summary_rows:
+        rows = summary_rows
     parsed = [_parse_kosis_row(r) for r in rows]
 
     return json.dumps(
         {
             "type": "시도·산업별 사업체수·종사자수·매출액 (전국사업체조사 2020~)",
+            "note": "전체 산업 합계만 표시. 산업별 상세는 kosis_get_data로 직접 조회.",
             "region": region,
             "year": year,
             "count": len(parsed),

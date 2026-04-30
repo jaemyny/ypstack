@@ -129,10 +129,20 @@ async def airkorea_get_station_list(addr: str) -> str:
         "addr": addr,
     }
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(url, params=params)
-        resp.raise_for_status()
-        data = resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPStatusError as e:
+        return json.dumps({
+            "error": f"에어코리아 측정소 API 오류 (HTTP {e.response.status_code})",
+            "hint": (
+                "측정소 목록 API는 일시적으로 403 거부될 수 있습니다. "
+                "실시간 측정값은 airkorea_get_realtime_air(station_name='강남구') 등으로 조회 가능."
+            ),
+            "addr": addr,
+        }, ensure_ascii=False, indent=2)
 
     items = data.get("response", {}).get("body", {}).get("items", [])
     if not items:
@@ -168,10 +178,12 @@ async def airkorea_get_region_avg(
     data_gubun: Optional[str] = "DAILY",
 ) -> str:
     """에어코리아 시도별 대기오염 평균 통계 조회.
+    ※ 주의: 에어코리아 API는 search_date 파라미터를 사실상 무시하고 항상 최근 30일치만 반환합니다.
+       과거 시점 데이터는 KOSIS 환경통계 또는 에어코리아 웹사이트에서 직접 다운로드 필요.
 
     Args:
         item_code: 오염물질 코드 (PM10/PM25/O3/NO2/CO/SO2, 기본값: PM25)
-        search_date: 조회 기준 연월 (YYYY-MM, 예: "2024-01")
+        search_date: 조회 기준 연월 (YYYY-MM) — 정부 API 제약으로 무시됨
         data_gubun: 데이터 구분 (DAILY/MONTHLY, 기본값: DAILY)
     """
     key = _get_data_go_key()
@@ -232,9 +244,10 @@ async def airkorea_get_region_avg(
 
     result = {
         "item_code": item_code,
-        "search_date": search_date,
+        "search_date_requested": search_date,
         "data_gubun": data_gubun,
         "count": len(records),
+        "note": "에어코리아 API는 항상 최근 30일치 데이터만 반환합니다. records[0].data_time을 확인하세요.",
         "records": records,
     }
     return json.dumps(result, ensure_ascii=False, indent=2)

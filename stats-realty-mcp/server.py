@@ -59,12 +59,24 @@ def _txt(el: ET.Element, tag: str) -> str:
     return e.text.strip() if e is not None and e.text else ""
 
 
-def _err(e: Exception) -> str:
+def _err(e: Exception, context: str = "") -> str:
+    """에러를 사용자에게 전달할 수 있는 형태로 직렬화."""
     if isinstance(e, httpx.HTTPStatusError):
-        return f"오류: HTTP {e.response.status_code}"
+        status = e.response.status_code
+        body = (e.response.text or "").strip()[:200]
+        if status == 500:
+            return json.dumps({
+                "error": f"공공데이터포털(data.go.kr) 서버 오류 (HTTP 500){': ' + context if context else ''}",
+                "raw": body or "Unexpected errors",
+                "hint": "잠시 후 재시도하거나, 일시적인 정부 API 점검 가능성을 확인해주세요.",
+            }, ensure_ascii=False, indent=2)
+        return json.dumps({
+            "error": f"HTTP {status} 오류{': ' + context if context else ''}",
+            "raw": body,
+        }, ensure_ascii=False, indent=2)
     if isinstance(e, httpx.TimeoutException):
-        return "오류: 요청 시간 초과"
-    return f"오류: {type(e).__name__} - {e}"
+        return json.dumps({"error": "요청 시간 초과(30s)"}, ensure_ascii=False, indent=2)
+    return json.dumps({"error": f"{type(e).__name__}: {e}"}, ensure_ascii=False, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -562,10 +574,15 @@ async def kb_get_price_stats(
         if df is None:
             return json.dumps({
                 "error": (
-                    f"지역코드 '{region_code}'에 대한 데이터를 불러오지 못했습니다. "
-                    "KB부동산 API가 지원하는 코드인지 확인하세요. "
-                    "(예: 11=서울, 26=부산, 27=대구, 28=인천, 29=광주, 30=대전, 31=울산, 36=세종)"
+                    f"지역코드 '{region_code}'에 대한 KB부동산 데이터를 불러오지 못했습니다. "
+                    "KB부동산 API는 광역시도 단위 일부만 지원합니다."
                 ),
+                "supported_codes": {
+                    "11": "서울특별시", "21": "부산광역시", "22": "대구광역시",
+                    "23": "인천광역시", "24": "광주광역시", "25": "대전광역시",
+                    "26": "울산광역시", "29": "세종특별자치시",
+                    "주의": "경기(41/42), 강원, 충청, 전라, 경상 등 도단위는 KB API에서 미지원될 수 있습니다.",
+                },
                 "stat_type": stat_type,
                 "region_code": region_code,
             }, ensure_ascii=False, indent=2)

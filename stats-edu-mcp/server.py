@@ -215,29 +215,32 @@ async def neis_get_academy_list(
     region: str,
     district: str,
     subject: Optional[str] = None,
+    limit: Optional[int] = 50,
 ) -> str:
     """NEIS 학원 목록 조회.
 
     Args:
         region: 교육청 관할 지역 (예: "서울특별시", "경기도")
         district: 행정구역명 (예: "강남구", "분당구", "수원시")
-        subject: 교습 분야 필터 (선택, 예: "수학", "영어", "국어", "과학")
+        subject: 키워드 부분일치 필터 (선택, 예: "수학", "영어", "코딩", "피아노").
+                 학원명·분야명·교습과정명 어디든 키워드가 포함되면 매칭.
+                 NEIS API의 정확한 분야명은 "입시.검정 및 보습", "예능(대)" 등 — 이런 카테고리는 그대로 입력 가능.
+        limit: 최대 반환 건수 (기본 50)
     """
     key = _get_neis_key()
     if not key:
         return "오류: NEIS_API_KEY 환경변수가 설정되지 않았습니다."
 
     edu_code = _get_edu_code(region)
+    # ※ NEIS REALM_SC_NM 필터는 정확 매칭만 허용하므로 클라이언트 측 부분일치로 처리
     params = {
         "KEY": key,
         "Type": "json",
         "pIndex": 1,
-        "pSize": 100,
+        "pSize": 1000,
         "ATPT_OFCDC_SC_CODE": edu_code,
         "ADMST_ZONE_NM": district,
     }
-    if subject:
-        params["REALM_SC_NM"] = subject
 
     url = f"{NEIS_BASE}/acaInsTiInfo"
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -253,6 +256,19 @@ async def neis_get_academy_list(
             ensure_ascii=False,
             indent=2,
         )
+
+    # subject 부분일치 필터 (학원명·분야명·교습과정명 어디든)
+    if subject:
+        kw = subject.strip()
+        rows = [
+            r for r in rows
+            if kw in (r.get("ACA_NM", "") or "")
+            or kw in (r.get("REALM_SC_NM", "") or "")
+            or kw in (r.get("LE_ORD_NM", "") or "")
+        ]
+
+    total_matched = len(rows)
+    rows = rows[: (limit or 50)]
 
     academies = []
     for row in rows:
@@ -270,9 +286,15 @@ async def neis_get_academy_list(
         "region": region,
         "district": district,
         "subject_filter": subject,
+        "matched": total_matched,
         "count": len(academies),
         "academies": academies,
     }
+    if subject and total_matched == 0:
+        result["hint"] = (
+            "키워드와 매칭되는 학원이 없습니다. "
+            "neis_get_academy_stats로 해당 지역의 분야별 분포를 먼저 확인하세요."
+        )
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 

@@ -120,11 +120,33 @@ def _check_kosis_key() -> Optional[str]:
 
 
 def _filter_by_region(items: list, region: Optional[str]) -> list:
+    """region 부분일치 필터. 정확 매칭(시도명) 우선, 없으면 부분일치 fallback."""
     if not region:
         return items
+    region_norm = region.strip()
+    # 1) 정확 매칭 또는 표준 시도명 매칭 (예: "대구" → "대구광역시")
+    sido_aliases = {
+        "서울": ("서울특별시",),
+        "부산": ("부산광역시",), "대구": ("대구광역시",), "인천": ("인천광역시",),
+        "광주": ("광주광역시",), "대전": ("대전광역시",), "울산": ("울산광역시",),
+        "세종": ("세종특별자치시",),
+        "경기": ("경기도",), "강원": ("강원특별자치도", "강원도"),
+        "충북": ("충청북도",), "충남": ("충청남도",),
+        "전북": ("전북특별자치도", "전라북도"), "전남": ("전라남도",),
+        "경북": ("경상북도",), "경남": ("경상남도",), "제주": ("제주특별자치도",),
+    }
+    candidates = sido_aliases.get(region_norm, ())
+    exact_match = [
+        it for it in items
+        if it.get("C1_NM", "") == region_norm
+        or it.get("C1_NM", "") in candidates
+    ]
+    if exact_match:
+        return exact_match
+    # 2) Fallback: 부분일치
     return [
         it for it in items
-        if region in it.get("C1_NM", "") or region in it.get("C1_NM_ENG", "")
+        if region_norm in it.get("C1_NM", "") or region_norm in it.get("C1_NM_ENG", "")
     ]
 
 
@@ -381,19 +403,27 @@ async def kosis_get_household_detail(
     year: Optional[Union[str, int]] = "2024",
 ) -> str:
     """
-    KOSIS 가구주 연령×가구원수×시군구 교차 통계를 조회합니다 (tblId=DT_1JC1511).
-    40,000셀 초과 방지를 위해 반드시 region_code를 지정하세요.
+    KOSIS 가구주 연령×가구원수 교차 통계를 조회합니다 (tblId=DT_1JC1511).
+    이 테이블은 시도(2자리) 단위만 지원합니다.
+    5자리 이상 시군구 코드는 자동으로 앞 2자리로 변환됩니다.
 
     Args:
-        region_code: 시도/시군구 코드 (예: "11"=서울, "11010"=종로구)
+        region_code: 시도 코드 2자리 (예: "11"=서울, "26"=부산, "41"=경기)
         age_code: 연령 코드 (예: "035"=30~34세, "040"=35~39세, "000"=합계, None=ALL)
-        itm_id: 항목 ID (예: "T100"=전체가구, "T220"=2인가구, None=ALL)
+        itm_id: 항목 ID (예: "T100"=일반가구, None=ALL). 합계 비교 시 "T100" 권장.
         year: 기준 연도 (기본 "2024")
     """
     year = str(year) if year is not None else "2024"
     err = _check_kosis_key()
     if err:
         return err
+
+    # 시군구 코드(5자리) → 시도 코드(2자리) 자동 변환
+    auto_trim_note = None
+    if region_code and len(region_code) > 2:
+        original = region_code
+        region_code = region_code[:2]
+        auto_trim_note = f"region_code '{original}' → '{region_code}' 자동 변환됨 (이 테이블은 시도 단위만 지원)"
 
     url = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
     params = {
@@ -428,19 +458,18 @@ async def kosis_get_household_detail(
     rows = data if isinstance(data, list) else []
     parsed = [_parse_kosis_row(r) for r in rows]
 
-    return json.dumps(
-        {
-            "type": "가구주연령×가구원수",
-            "region_code": region_code,
-            "age_code": age_code,
-            "itm_id": itm_id,
-            "year": year,
-            "count": len(parsed),
-            "data": parsed,
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
+    result = {
+        "type": "가구주연령×가구원수 (DT_1JC1511, 시도단위)",
+        "region_code": region_code,
+        "age_code": age_code,
+        "itm_id": itm_id,
+        "year": year,
+        "count": len(parsed),
+        "data": parsed,
+    }
+    if auto_trim_note:
+        result["note"] = auto_trim_note
+    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 # ── 도구 6: sgis_get_region_stats ─────────────────────────────
@@ -460,47 +489,21 @@ async def sgis_get_region_stats(
         year: 기준 연도 (기본 "2024")
     """
     year = str(year) if year is not None else "2024"
-    if not SGIS_CONSUMER_KEY or not SGIS_CONSUMER_SECRET:
-        return "SGIS_CONSUMER_KEY 또는 SGIS_CONSUMER_SECRET 환경변수가 설정되지 않았습니다."
-
-    try:
-        token = await _get_sgis_token()
-    except ValueError as e:
-        return str(e)
-
-    url = (
-        "https://sgis.kostat.go.kr/OpenAPI2/service/rest/Population2"
-        "/getRestControlPopulatioByArea"
-    )
-    params = {
-        "accessToken": token,
-        "areaId": area_id,
-        "dvsn": division,
-        "gender": 0,
-        "age": -1,
-        "year": year or "2024",
-    }
-    async with httpx.AsyncClient(timeout=30.0) as c:
-        r = await c.get(url, params=params)
-        data = r.json()
-
-    if data.get("errCode") != 0:
-        return f"SGIS 조회 오류: {data.get('errMsg', data)}"
-
-    result_data = data.get("result", [])
-
-    return json.dumps(
-        {
-            "type": "SGIS 지역별 인구",
-            "area_id": area_id,
-            "division": division,
-            "year": year,
-            "count": len(result_data),
-            "data": result_data,
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
+    return json.dumps({
+        "error": (
+            "SGIS OpenAPI v2 (sgis.kostat.go.kr/OpenAPI2)가 서비스 종료되었습니다. "
+            "v3 endpoint(sgis.kostat.go.kr/OpenAPI3)로 이전되었으나 인증 절차가 변경되어 "
+            "현재 자동 호출이 불가합니다."
+        ),
+        "alternative": [
+            "kosis_get_population(region, year) — 시도별 인구통계",
+            "seoul_get_living_population(date, district_code) — 서울 생활인구",
+            "sgis_get_region_stats 대체 데이터를 SGIS 웹사이트(sgis.kostat.go.kr)에서 직접 확인",
+        ],
+        "area_id": area_id,
+        "division": division,
+        "year": year,
+    }, ensure_ascii=False, indent=2)
 
 
 # ── 도구 7: seoul_get_living_population ───────────────────────

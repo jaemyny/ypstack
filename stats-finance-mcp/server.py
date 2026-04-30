@@ -184,12 +184,17 @@ async def ecos_get_interest_rate(
 # ---------------------------------------------------------------------------
 
 INDICATOR_MAP = {
-    # (stat_code, ecos_cycle, item_code)  — ecos_cycle: M/D/Q/A
-    "CPI":    ("ECOS", "901Y009", "M", ""),    # 소비자물가지수 총지수 (월별)
-    "환율":   ("ECOS", "731Y001", "D", ""),    # 주요국 대원화환율 일별 (원달러 포함)
-    "실업률": ("ECOS", "901Y027", "M", ""),    # 경제활동인구조사 (월별)
-    "GDP":    ("ECOS", "200Y102", "Q", ""),    # GDP 분기성장률 계절조정 (날짜: YYYYQ1~YYYYQ4)
-    "통화량": ("KOSIS", "301", "DT_161Y009", "M"),  # M2 경제주체별 보유현황 평잔 계절조정 (KOSIS)
+    # (source, stat/org_id, cycle/tbl_id, item_code/cycle, key_filters)
+    # key_filters: 응답 내 핵심 항목만 추리는 부분일치 키워드 (verbose=False일 때만 적용)
+    "CPI":    ("ECOS", "901Y009", "M", "", ["총지수"]),
+    "환율":   ("ECOS", "731Y001", "D", "", ["원/미국달러", "원/일본엔", "원/유로", "원/위안"]),
+    "실업률": ("ECOS", "901Y027", "M", "", ["실업률", "고용률", "경제활동참가율"]),
+    "GDP":    ("ECOS", "200Y102", "Q", "", [
+        "국내총생산(GDP)(실질, 계절조정, 전기비)",
+        "국내총생산(GDP)(실질, 원계열, 전년동기비)",
+        "GDP 디플레이터",
+    ]),
+    "통화량": ("KOSIS", "301", "DT_161Y009", "M", ["M2"]),
 }
 
 
@@ -199,6 +204,7 @@ async def ecos_get_economic_indicator(
     start_date: str,
     end_date: str,
     cycle: Optional[str] = None,
+    verbose: Optional[bool] = False,
 ) -> str:
     """
     한국 주요 경제지표 조회.
@@ -208,6 +214,7 @@ async def ecos_get_economic_indicator(
         start_date: 시작일 (YYYYMM, 환율은 YYYYMMDD)
         end_date: 종료일 (YYYYMM, 환율은 YYYYMMDD)
         cycle: ECOS 주기 M/D/Q/A. 미입력 시 지표별 기본값 사용
+        verbose: True면 전체 세부 항목 반환, False(기본값)면 핵심 항목만 반환
 
     Returns:
         JSON 문자열 — {indicator, stat_code, period, count, data:[{date, value, unit}]}
@@ -228,13 +235,25 @@ async def ecos_get_economic_indicator(
 
     entry = INDICATOR_MAP[indicator]
     source = entry[0]
+    key_filters = entry[4] if len(entry) >= 5 else []
+
+    def _filter_records(records: list, name_field: str = "item_name") -> list:
+        """verbose=False면 key_filters에 매칭되는 핵심 항목만 반환."""
+        if verbose or not key_filters:
+            return records
+        out = []
+        for r in records:
+            name = r.get(name_field, "")
+            if any(kw in name for kw in key_filters):
+                out.append(r)
+        return out
 
     # ── 통화량(M2): KOSIS 경유 ──────────────────────────────────────
     if source == "KOSIS":
         kosis_key = os.environ.get("KOSIS_API_KEY", "")
         if not kosis_key:
             return json.dumps({"error": "KOSIS_API_KEY 환경변수가 설정되지 않았습니다."}, ensure_ascii=False)
-        _, org_id, tbl_id, kosis_cycle = entry
+        _, org_id, tbl_id, kosis_cycle, _filters = (*entry, [])[:5]
         use_cycle = cycle or kosis_cycle
         url = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
         params = {
@@ -259,21 +278,30 @@ async def ecos_get_economic_indicator(
             {
                 "date":      r.get("PRD_DE", ""),
                 "item_name": r.get("ITM_NM", ""),
+                "obj_name":  r.get("C1_NM", ""),
                 "value":     r.get("DT", ""),
                 "unit":      r.get("UNIT_NM", ""),
             }
             for r in rows
         ]
+        # 통화량은 "전체" / "총량" 류만 (obj_name == "M2 평잔 계절조정계열" 또는 첫 항목)
+        if not verbose:
+            # M2 통화량의 경우 첫 번째 obj (전체 합계)만 반환
+            if records:
+                first_obj = records[0].get("obj_name", "")
+                records = [r for r in records if r.get("obj_name", "") == first_obj]
+
         return json.dumps({
             "indicator": indicator,
             "source": f"KOSIS {org_id}/{tbl_id}",
             "period": f"{start_date} ~ {end_date}",
             "count": len(records),
             "data": records,
+            "verbose": verbose,
         }, ensure_ascii=False, indent=2)
 
     # ── ECOS 경유 ───────────────────────────────────────────────────
-    _, stat_code, default_cycle, item_code = entry
+    _, stat_code, default_cycle, item_code, _filters = (*entry, [])[:5]
     use_cycle = cycle or default_cycle
 
     def _fmt(d: str, cyc: str) -> str:
@@ -316,6 +344,9 @@ async def ecos_get_economic_indicator(
         for r in rows
     ]
 
+    # 핵심 항목 필터링
+    records = _filter_records(records, "item_name")
+
     return json.dumps({
         "indicator": indicator,
         "stat_code": stat_code,
@@ -323,6 +354,7 @@ async def ecos_get_economic_indicator(
         "period": f"{start_date} ~ {end_date}",
         "count": len(records),
         "data": records,
+        "verbose": verbose,
     }, ensure_ascii=False, indent=2)
 
 
@@ -594,11 +626,13 @@ async def dart_get_financial_statement(
 # ---------------------------------------------------------------------------
 
 # KOSIS 한국거래소(orgId=343) 주요 주가지수 테이블
+# 주의: DT_343_2010_S0029(KOSPI) 테이블은 KOSPI 종합지수와 함께 KOSPI200, 음식료품 등 16개 업종 지수가 같이 들어있음
+# 응답에서 첫 번째 항목(KOSPI 종합주가지수)만 반환 — verbose=True면 전체 반환
 _KOSIS_KRX_TBL = {
-    "KOSPI":    ("343", "DT_343_2010_S0029"),   # KOSPI 종합주가지수 (월별)
-    "KOSDAQ":   ("343", "DT_343_2010_S0034"),   # KOSDAQ 종합주가지수 (월별)
-    "PER":      ("343", "DT_343_2010_S0033"),   # KOSPI PER (월별)
-    "배당수익률": ("343", "DT_343_2010_S0032"),  # KOSPI 배당수익률 (월별)
+    "KOSPI": ("343", "DT_343_2010_S0029", ["주요주가지수"]),     # KOSPI 종합 + 업종지수 (월별)
+    "PER":   ("343", "DT_343_2010_S0033", ["주가수익비율"]),     # KOSPI PER (월별)
+    "배당수익률": ("343", "DT_343_2010_S0032", ["배당수익률"]),  # KOSPI 배당수익률 (월별)
+    "PBR":   ("343", "DT_343_2010_S0034", ["주가순자산비율"]),   # KOSPI PBR (월별)
 }
 
 
@@ -607,20 +641,25 @@ async def kosis_get_stock_index(
     index_type: str = "KOSPI",
     start_date: str = "202401",
     end_date: str = "202512",
+    verbose: Optional[bool] = False,
 ) -> str:
     """
     KOSIS(한국거래소) 주가지수 조회. KRX 직접 API 대체.
 
     지원 index_type:
-      KOSPI     = KOSPI 종합주가지수 (월별)
-      KOSDAQ    = KOSDAQ 종합주가지수 (월별)
-      PER       = KOSPI PER (월별)
+      KOSPI     = KOSPI 종합주가지수 (월별, KOSPI200·업종지수 포함)
+      PER       = KOSPI 주가수익비율(PER) (월별)
       배당수익률 = KOSPI 배당수익률 (월별)
+      PBR       = KOSPI 주가순자산비율(PBR) (월별)
+
+    ※ KOSDAQ 종합지수는 현재 KOSIS 테이블 매핑이 확인되지 않아 미지원입니다.
+       KRX Open API(IP 등록 필요) 또는 한국은행 ECOS의 별도 통계표 활용을 권장합니다.
 
     Args:
         index_type: 지수 유형 (기본 "KOSPI")
         start_date: 시작 연월 YYYYMM (기본 "202401")
         end_date:   종료 연월 YYYYMM (기본 "202512")
+        verbose:    True면 업종 하위 지수 포함, False(기본)면 종합지수 첫 행만 반환
 
     Returns:
         JSON 문자열 — {index_type, period, count, data:[{date, value, unit}]}
@@ -638,7 +677,7 @@ async def kosis_get_stock_index(
             ensure_ascii=False,
         )
 
-    org_id, tbl_id = _KOSIS_KRX_TBL[index_type]
+    org_id, tbl_id, _filter_kw = _KOSIS_KRX_TBL[index_type]
     url = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
     params = {
         "method": "getList",
@@ -663,11 +702,17 @@ async def kosis_get_stock_index(
         {
             "date":      r.get("PRD_DE", ""),
             "item_name": r.get("ITM_NM", ""),
+            "obj_name":  r.get("C1_NM", ""),
             "value":     r.get("DT", ""),
             "unit":      r.get("UNIT_NM", ""),
         }
         for r in rows
     ]
+
+    # verbose=False면 종합지수 첫 obj_name만 (KOSPI 종합)
+    if not verbose and records:
+        first_obj = records[0].get("obj_name", "")
+        records = [r for r in records if r.get("obj_name", "") == first_obj]
 
     return json.dumps(
         {
@@ -676,6 +721,7 @@ async def kosis_get_stock_index(
             "period": f"{start_date} ~ {end_date}",
             "count": len(records),
             "data": records,
+            "verbose": verbose,
         },
         ensure_ascii=False,
         indent=2,
