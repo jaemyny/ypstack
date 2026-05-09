@@ -514,20 +514,46 @@ async def sgis_get_region_stats(
 
 # ── 도구 7: seoul_get_living_population ───────────────────────
 
+# 서울 25개 자치구 시군구 코드 (district 이름 → SIGNGU_CODE_SE)
+_SEOUL_DISTRICT_CODE = {
+    "종로구": "11110", "중구":   "11140", "용산구": "11170", "성동구": "11200",
+    "광진구": "11215", "동대문구":"11230", "중랑구": "11260", "성북구": "11290",
+    "강북구": "11305", "도봉구": "11320", "노원구": "11350", "은평구": "11380",
+    "서대문구":"11410", "마포구": "11440", "양천구": "11470", "강서구": "11500",
+    "구로구": "11530", "금천구": "11545", "영등포구":"11560", "동작구": "11590",
+    "관악구": "11620", "서초구": "11650", "강남구": "11680", "송파구": "11710",
+    "강동구": "11740",
+}
+
+
 @mcp.tool(annotations=_ANNOT)
 async def seoul_get_living_population(
-    date: str,
+    date: Union[str, int],
     district_code: Optional[str] = None,
+    district: Optional[str] = None,
 ) -> str:
     """
-    서울시 열린데이터광장에서 생활인구(추정 체류인구) 데이터를 조회합니다.
+    서울시 열린데이터광장에서 자치구별 생활인구(추정 체류인구) 데이터를 조회합니다.
 
     Args:
         date: 조회 날짜 (YYYYMMDD 형식, 예: "20240101")
-        district_code: 집계구 코드 (선택, 미입력 시 전체)
+        district_code: 시군구 5자리 코드 (예: "11680" = 강남구). 미입력 시 전체.
+        district: 자치구 이름 (예: "강남구", "마포구"). district_code의 친화 alias.
     """
     if not SEOUL_API_KEY:
         return "SEOUL_API_KEY 환경변수가 설정되지 않았습니다."
+
+    date = str(date).strip()
+    # district 이름 → 코드 변환 (district_code 미지정 시)
+    if not district_code and district:
+        d = str(district).strip()
+        if d.isdigit():
+            district_code = d
+        else:
+            for name, c in _SEOUL_DISTRICT_CODE.items():
+                if d == name or d == name.replace("구", "") or d in name:
+                    district_code = c
+                    break
 
     base_url = f"http://openapi.seoul.go.kr:8088/{SEOUL_API_KEY}/json/SPOP_DAILYSUM_JACHI/1/100/{date}/"
     if district_code:

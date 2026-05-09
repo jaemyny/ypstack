@@ -7,7 +7,7 @@ stats-realty-mcp: 한국 부동산 실거래가 · 가격지수 · 공급 · 단
 - KB부동산: 가격지수·HAI·PIR (PublicDataReader, 무키)
 """
 import json, os, xml.etree.ElementTree as ET
-from typing import Optional
+from typing import Optional, Union
 import httpx
 from pydantic import BaseModel, Field, ConfigDict
 from mcp.server.fastmcp import FastMCP
@@ -17,6 +17,52 @@ mcp = FastMCP("stats-realty")
 DATA_GO_KR_KEY = os.getenv("DATA_GO_KR_KEY", "")
 REB_API_KEY    = os.getenv("REB_API_KEY", "")
 KOSIS_API_KEY  = os.getenv("KOSIS_API_KEY", "")
+
+# 서울 25개 자치구 시군구 코드 매핑 (LLM이 "강남구"로 호출 시 자동 변환)
+SEOUL_SIGUNGU_CODE = {
+    "종로구": "11110", "중구":   "11140", "용산구": "11170", "성동구": "11200",
+    "광진구": "11215", "동대문구":"11230", "중랑구": "11260", "성북구": "11290",
+    "강북구": "11305", "도봉구": "11320", "노원구": "11350", "은평구": "11380",
+    "서대문구":"11410", "마포구": "11440", "양천구": "11470", "강서구": "11500",
+    "구로구": "11530", "금천구": "11545", "영등포구":"11560", "동작구": "11590",
+    "관악구": "11620", "서초구": "11650", "강남구": "11680", "송파구": "11710",
+    "강동구": "11740",
+}
+
+# 시도명 → KOSIS C1_NM 정규화 (별칭 → 표준 명)
+SIDO_ALIASES = {
+    "서울": "서울특별시",  "부산": "부산광역시",  "대구": "대구광역시",
+    "인천": "인천광역시",  "광주": "광주광역시",  "대전": "대전광역시",
+    "울산": "울산광역시",  "세종": "세종특별자치시",
+    "경기": "경기도",      "강원": "강원특별자치도", "강원도": "강원특별자치도",
+    "충북": "충청북도",    "충남": "충청남도",
+    "전북": "전북특별자치도", "전라북도": "전북특별자치도", "전남": "전라남도",
+    "경북": "경상북도",    "경남": "경상남도",  "제주": "제주특별자치도",
+}
+
+
+def _resolve_sigungu(district: Optional[str], code: Optional[str] = None) -> Optional[str]:
+    """자치구 이름 또는 코드를 시군구 5자리 코드로 정규화."""
+    if code:
+        return str(code).strip()
+    if not district:
+        return None
+    d = str(district).strip()
+    if d.isdigit():
+        return d
+    for name, c in SEOUL_SIGUNGU_CODE.items():
+        if d == name or d == name.replace("구", "") or d in name:
+            return c
+    return None
+
+
+def _resolve_sido(name: Optional[str]) -> Optional[str]:
+    """시도명을 KOSIS 표준 시도명으로 정규화."""
+    if not name:
+        return None
+    n = str(name).strip()
+    return SIDO_ALIASES.get(n, n)
+
 
 RTMS_TRADE_URL    = "http://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev"
 RTMS_RENT_URL     = "http://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
@@ -311,19 +357,31 @@ async def rtms_get_apt_presale_transfer(
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
 async def apt_search_complex(
-    sigungu_cd: str,
+    sigungu_cd: Optional[str] = None,
     apt_name: Optional[str] = None,
+    district: Optional[str] = None,
     limit: Optional[int] = 20,
 ) -> str:
     """공동주택 단지 목록을 조회합니다.
 
     Args:
-        sigungu_cd: 시군구코드 5자리 (예: "11230" = 강남구)
-        apt_name: 아파트명 필터 (선택)
+        sigungu_cd: 시군구코드 5자리 (예: "11680" = 강남구). district로 대체 가능.
+        apt_name: 아파트명 필터 (선택, 부분일치)
+        district: 자치구 이름 (예: "강남구", "마포구"). sigungu_cd의 친화 alias.
+                  ※ 시군구 단위 검색만 지원 — 전국 검색은 정부 API 자체가 미지원입니다.
         limit: 최대 반환 건수 (기본 20)
     """
     if not DATA_GO_KR_KEY:
         return "오류: DATA_GO_KR_KEY 환경변수가 설정되지 않았습니다."
+    # district 이름 → 코드 자동 변환 (sigungu_cd 미지정 시)
+    resolved = _resolve_sigungu(district, sigungu_cd)
+    if not resolved:
+        return json.dumps({
+            "error": "sigungu_cd 또는 district가 필요합니다.",
+            "hint": "정부 API는 시군구 단위로만 검색을 지원합니다. 예: sigungu_cd='11680' 또는 district='강남구'",
+            "supported_districts": list(SEOUL_SIGUNGU_CODE.keys()),
+        }, ensure_ascii=False, indent=2)
+    sigungu_cd = resolved
     try:
         root = await _get_xml(APT_LIST_URL, {
             "serviceKey": DATA_GO_KR_KEY,
@@ -390,27 +448,46 @@ async def apt_get_complex_detail(kapt_code: str) -> str:
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
 async def molit_get_housing_permit(
-    sido: str,
-    year_month: str,
+    sido: Optional[str] = None,
+    year_month: Optional[Union[str, int]] = None,
+    region: Optional[str] = None,
+    year: Optional[Union[str, int]] = None,
     limit: Optional[int] = 50,
 ) -> str:
     """국토부 주택 인허가 실적을 조회합니다.
 
     Args:
-        sido: 시도명 (예: "서울특별시", "경기도")
-        year_month: 조회 기간 (YYYYMM 또는 YYYY)
+        sido: 시도명 (예: "서울특별시", "경기도"). region으로 대체 가능.
+        year_month: 조회 기간 (YYYYMM 예: "202403", 또는 YYYY 예: "2024" → 해당 연도 전체).
+                    year로 대체 가능.
+        region: sido의 친화 alias (예: "서울"=서울특별시 자동 변환)
+        year: year_month의 친화 alias (4자리 YYYY)
         limit: 최대 반환 건수 (기본 50)
     """
     if not DATA_GO_KR_KEY:
         return "오류: DATA_GO_KR_KEY 환경변수가 설정되지 않았습니다."
+    # alias 정규화
+    sido = _resolve_sido(sido or region)
+    ym = year_month if year_month is not None else year
+    if ym is None:
+        return json.dumps({
+            "error": "year_month(또는 year)가 필요합니다.",
+            "examples": ["year_month='202403' (특정월)", "year='2024' (연도 전체)"],
+        }, ensure_ascii=False, indent=2)
+    if not sido:
+        return json.dumps({
+            "error": "sido(또는 region)가 필요합니다.",
+            "examples": ["sido='서울특별시'", "region='경기'(=경기도)"],
+        }, ensure_ascii=False, indent=2)
     try:
+        ym = str(ym).strip()
         # 4자리 연도인 경우 해당 연도 전체로 처리
-        if len(year_month) == 4:
-            start_ymd = year_month + "01"
-            end_ymd = year_month + "12"
+        if len(ym) == 4:
+            start_ymd = ym + "01"
+            end_ymd = ym + "12"
         else:
-            start_ymd = year_month
-            end_ymd = year_month
+            start_ymd = ym
+            end_ymd = ym
 
         root = await _get_xml(HOUSING_PMT_URL, {
             "serviceKey": DATA_GO_KR_KEY,
@@ -457,9 +534,11 @@ _REB_TBL = {
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
 async def reb_get_price_index(
-    year_month: str,
+    year_month: Optional[Union[str, int]] = None,
     stat_type: str = "매매",
     region: Optional[str] = None,
+    price_type: Optional[str] = None,
+    region_code: Optional[str] = None,
 ) -> str:
     """한국부동산원 아파트 가격지수를 조회합니다 (KOSIS 한국부동산원, 주간).
 
@@ -467,9 +546,34 @@ async def reb_get_price_index(
         year_month: 조회년월 (YYYYMM, 예: "202503") — 해당 월의 주간 데이터를 반환
         stat_type: 통계 유형 ("매매" 또는 "전세", 기본 "매매")
         region: 지역명 필터 (선택, 예: "서울", "수도권", "전국")
+        price_type: stat_type 친화 alias (예: "매매" / "전세")
+        region_code: (호환용 — 시도 코드. KOSIS C1_NM과 매칭되지 않으므로 region 사용 권장)
     """
     if not KOSIS_API_KEY:
         return "오류: KOSIS_API_KEY 환경변수가 설정되지 않았습니다."
+    # alias 처리
+    if price_type and not stat_type:
+        stat_type = price_type
+    elif price_type:
+        stat_type = price_type  # price_type 우선
+    if year_month is None:
+        return json.dumps({
+            "error": "year_month가 필요합니다 (YYYYMM, 예: '202503')",
+        }, ensure_ascii=False, indent=2)
+    year_month = str(year_month).strip()
+    # region_code가 들어오면 시도명으로 변환 시도 (sido 코드 → 표준명)
+    if region_code and not region:
+        sido_code_map = {
+            "11": "서울특별시", "21": "부산광역시", "22": "대구광역시", "23": "인천광역시",
+            "24": "광주광역시", "25": "대전광역시", "26": "울산광역시", "29": "세종특별자치시",
+            "31": "경기도", "32": "강원특별자치도", "33": "충청북도", "34": "충청남도",
+            "35": "전북특별자치도", "36": "전라남도", "37": "경상북도", "38": "경상남도",
+            "39": "제주특별자치도",
+        }
+        rc = str(region_code).strip()[:2]
+        region = sido_code_map.get(rc)
+    region = _resolve_sido(region) if region else None
+
     if stat_type not in _REB_TBL:
         return json.dumps(
             {"error": f"지원하지 않는 stat_type: {stat_type}. ('매매' 또는 '전세')"},
