@@ -5,6 +5,12 @@
 
 ---
 
+## 문서
+
+- [`docs/realty-mcp-prd.md`](./docs/realty-mcp-prd.md) — 한국 부동산 데이터 MCP 통합 PRD (stats-realty + kb-price). Phase 1 완료, Phase 2 예정.
+
+---
+
 ## 포함된 도구
 
 ### 슬래시 커맨드 (Slash Commands)
