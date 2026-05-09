@@ -226,8 +226,8 @@ async def kosis_get_data(
     obj_l2: str = "ALL",
     itm_id: str = "ALL",
     prd_se: str = "Y",
-    start_period: Optional[str] = None,
-    end_period: Optional[str] = None,
+    start_period: Optional[Union[str, int]] = None,
+    end_period: Optional[Union[str, int]] = None,
     limit: int = 100,
 ) -> str:
     """

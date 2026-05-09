@@ -2,7 +2,7 @@
 
 import json
 import os
-from typing import Optional
+from typing import Optional, Union
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -312,7 +312,7 @@ async def seoul_get_park_list(
 @mcp.tool(annotations=_TOOL_ANNOTATIONS)
 async def kosis_get_env_stats(
     keyword: str = "환경",
-    year: Optional[str] = None,
+    year: Optional[Union[str, int]] = None,
 ) -> str:
     """KOSIS 환경 관련 통계표 검색.
 
@@ -356,11 +356,13 @@ async def kosis_get_env_stats(
             "count": len(items),
             "stats": [
                 {
-                    "org_id": item.get("orgId", ""),
-                    "table_id": item.get("tblId", ""),
-                    "table_nm": item.get("tblNm", ""),
-                    "org_nm": item.get("orgNm", ""),
-                    "stats_knd": item.get("statsKnd", ""),
+                    # statisticsSearch.do는 UPPERCASE 필드명 사용
+                    "org_id":    item.get("ORG_ID",   "") or item.get("orgId",   ""),
+                    "table_id":  item.get("TBL_ID",   "") or item.get("tblId",   ""),
+                    "table_nm":  item.get("TBL_NM",   "") or item.get("tblNm",   ""),
+                    "org_nm":    item.get("ORG_NM",   "") or item.get("orgNm",   ""),
+                    "stats_knd": item.get("STATS_KND","") or item.get("statsKnd",""),
+                    "period":    f"{item.get('STRT_PRD_DE','')}~{item.get('END_PRD_DE','')}",
                 }
                 for item in items
             ],

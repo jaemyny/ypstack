@@ -2,7 +2,7 @@
 
 import json
 import os
-from typing import Optional
+from typing import Optional, Union
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -123,16 +123,17 @@ async def neis_get_school_list(
 
     schools = []
     for row in rows:
-        addr = row.get("ORG_RDNMA", "")
+        # NEIS API가 일부 필드를 None으로 반환할 수 있음 — None-safe
+        addr = row.get("ORG_RDNMA") or ""
         if district and district not in addr:
             continue
         schools.append({
-            "name": row.get("SCHUL_NM", ""),
-            "type": row.get("SCHUL_KND_SC_NM", ""),
+            "name": row.get("SCHUL_NM") or "",
+            "type": row.get("SCHUL_KND_SC_NM") or "",
             "address": addr,
-            "phone": row.get("ORG_TELNO", ""),
-            "founded": row.get("FOND_YMD", ""),
-            "student_count": row.get("PUPIL_CNT", ""),
+            "phone": row.get("ORG_TELNO") or "",
+            "founded": row.get("FOND_YMD") or "",
+            "student_count": row.get("PUPIL_CNT") or "",
         })
 
     result = {
@@ -311,36 +312,49 @@ async def neis_get_academy_stats(region: str, district: str) -> str:
         return "오류: NEIS_API_KEY 환경변수가 설정되지 않았습니다."
 
     edu_code = _get_edu_code(region)
-    params = {
-        "KEY": key,
-        "Type": "json",
-        "pIndex": 1,
-        "pSize": 1000,
-        "ATPT_OFCDC_SC_CODE": edu_code,
-        "ADMST_ZONE_NM": district,
-    }
-
     url = f"{NEIS_BASE}/acaInsTiInfo"
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(url, params=params)
-        resp.raise_for_status()
-        data = resp.json()
 
-    rows = data.get("acaInsTiInfo", [{}])[1].get("row", []) if len(data.get("acaInsTiInfo", [])) > 1 else []
-    if not rows:
-        error_info = data.get("RESULT", {})
+    # NEIS pSize=1000 cap → 페이지네이션으로 전체 수집 (최대 5페이지=5000건)
+    all_rows: list = []
+    last_msg = ""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for page in range(1, 6):
+            params = {
+                "KEY": key,
+                "Type": "json",
+                "pIndex": page,
+                "pSize": 1000,
+                "ATPT_OFCDC_SC_CODE": edu_code,
+                "ADMST_ZONE_NM": district,
+            }
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            page_rows = (
+                data.get("acaInsTiInfo", [{}])[1].get("row") or []
+                if len(data.get("acaInsTiInfo", [])) > 1
+                else []
+            )
+            if not page_rows:
+                last_msg = data.get("RESULT", {}).get("MESSAGE", "")
+                break
+            all_rows.extend(page_rows)
+            if len(page_rows) < 1000:
+                break  # 마지막 페이지
+
+    if not all_rows:
         return json.dumps(
-            {"error": error_info.get("MESSAGE", "데이터가 없습니다."), "district": district},
+            {"error": last_msg or "데이터가 없습니다.", "district": district},
             ensure_ascii=False,
             indent=2,
         )
 
     subject_counter: dict[str, int] = {}
-    for row in rows:
+    for row in all_rows:
         subj = row.get("REALM_SC_NM", "기타")
         subject_counter[subj] = subject_counter.get(subj, 0) + 1
 
-    total = len(rows)
+    total = len(all_rows)
     by_subject = sorted(
         [
             {
@@ -358,6 +372,7 @@ async def neis_get_academy_stats(region: str, district: str) -> str:
         "region": region,
         "district": district,
         "total_count": total,
+        "pages_fetched": (total // 1000) + (1 if total % 1000 else 0),
         "by_subject": by_subject,
     }
     return json.dumps(result, ensure_ascii=False, indent=2)

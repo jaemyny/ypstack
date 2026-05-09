@@ -3,7 +3,7 @@ stats-finance-mcp: 한국은행 ECOS + OpenDART 금융 데이터 MCP 서버
 """
 import json
 import os
-from typing import Optional
+from typing import Optional, Union
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -112,8 +112,8 @@ async def ecos_search_stats(keyword: str, limit: Optional[int] = 20) -> str:
 
 @mcp.tool()
 async def ecos_get_interest_rate(
-    start_date: str,
-    end_date: str,
+    start_date: Union[str, int],
+    end_date: Union[str, int],
     stat_code: Optional[str] = "722Y001",
     cycle: Optional[str] = None,
 ) -> str:
@@ -140,6 +140,10 @@ async def ecos_get_interest_rate(
         key = _ecos_key()
     except ValueError as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+    # MCP 런타임이 숫자를 int로 전달하는 경우 대비
+    start_date = str(start_date)
+    end_date = str(end_date)
 
     item_code, default_cycle = ECOS_ITEM_MAP.get(stat_code, ("", "M"))
     use_cycle = cycle or default_cycle
@@ -201,8 +205,8 @@ INDICATOR_MAP = {
 @mcp.tool()
 async def ecos_get_economic_indicator(
     indicator: str,
-    start_date: str,
-    end_date: str,
+    start_date: Union[str, int],
+    end_date: Union[str, int],
     cycle: Optional[str] = None,
     verbose: Optional[bool] = False,
 ) -> str:
@@ -223,6 +227,10 @@ async def ecos_get_economic_indicator(
         key = _ecos_key()
     except ValueError as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+    # MCP 런타임이 숫자를 int로 전달하는 경우 대비
+    start_date = str(start_date)
+    end_date = str(end_date)
 
     if indicator not in INDICATOR_MAP:
         return json.dumps(
@@ -328,8 +336,9 @@ async def ecos_get_economic_indicator(
     e = _fmt(end_date, use_cycle)
     item_suffix = f"/{item_code}" if item_code else ""
 
+    # ECOS API row limit: 1/2000 — CPI/실업률처럼 다항목 통계는 200으로 부족
     url = (
-        f"{ECOS_BASE}/StatisticSearch/{key}/json/kr/1/200"
+        f"{ECOS_BASE}/StatisticSearch/{key}/json/kr/1/2000"
         f"/{stat_code}/{use_cycle}/{s}/{e}{item_suffix}"
     )
     try:
@@ -371,7 +380,10 @@ async def ecos_get_economic_indicator(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-async def ecos_get_housing_loan_rate(start_date: str, end_date: str) -> str:
+async def ecos_get_housing_loan_rate(
+    start_date: Union[str, int],
+    end_date: Union[str, int],
+) -> str:
     """
     주택담보대출 관련 금리 비교 조회 (COFIX + 기준금리).
 
@@ -386,6 +398,10 @@ async def ecos_get_housing_loan_rate(start_date: str, end_date: str) -> str:
         key = _ecos_key()
     except ValueError as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+    # MCP 런타임이 숫자를 int로 전달하는 경우 대비
+    start_date = str(start_date)
+    end_date = str(end_date)
 
     targets = [
         ("121Y006", "COFIX (신규취급액기준)"),
@@ -464,20 +480,30 @@ async def dart_search_company(corp_name: str, limit: Optional[int] = 10) -> str:
     except Exception as e:
         return json.dumps({"error": f"DART corpCode 다운로드 실패: {e}"}, ensure_ascii=False)
 
-    companies = []
+    matched = []
+    kw = corp_name.lower()
     for item in root.findall("list"):
         name = item.findtext("corp_name", "")
-        if corp_name.lower() not in name.lower():
+        if kw not in name.lower():
             continue
         stock_code = item.findtext("stock_code", "").strip()
-        companies.append({
+        matched.append({
             "corp_code": item.findtext("corp_code", ""),
             "corp_name": name,
             "stock_code": stock_code if stock_code else "-",
             "modify_date": item.findtext("modify_date", ""),
         })
-        if len(companies) >= limit:
-            break
+
+    # 모회사(상장사) 우선 정렬: 정확 일치 → 상장(stock_code 보유) → 짧은 이름
+    def _rank(c: dict) -> tuple:
+        nm = c["corp_name"].lower()
+        return (
+            0 if nm == kw else 1,                       # 1순위: 정확 일치
+            0 if c["stock_code"] != "-" else 1,         # 2순위: 상장 본사
+            len(nm),                                     # 3순위: 짧은 이름 우선
+        )
+    matched.sort(key=_rank)
+    companies = matched[:limit]
 
     result = {"count": len(companies), "companies": companies}
     return json.dumps(result, ensure_ascii=False, indent=2)
@@ -566,8 +592,8 @@ REPORT_TYPE_MAP = {
 @mcp.tool()
 async def dart_get_financial_statement(
     corp_code: str,
-    year: str,
-    report_type: Optional[str] = "11011",
+    year: Union[str, int],
+    report_type: Optional[Union[str, int]] = "11011",
 ) -> str:
     """
     OpenDART 단일 기업 재무제표 조회 (연결재무제표 우선).
@@ -588,6 +614,10 @@ async def dart_get_financial_statement(
         key = _dart_key()
     except ValueError as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+    # MCP 런타임이 숫자를 int로 전달하는 경우 대비
+    year = str(year)
+    report_type = str(report_type) if report_type is not None else "11011"
 
     url = f"{DART_BASE}/fnlttSinglAcnt.json"
     params = {
@@ -647,8 +677,8 @@ _KOSIS_KRX_TBL = {
 @mcp.tool()
 async def kosis_get_stock_index(
     index_type: str = "KOSPI",
-    start_date: str = "202401",
-    end_date: str = "202512",
+    start_date: Union[str, int] = "202401",
+    end_date: Union[str, int] = "202512",
     verbose: Optional[bool] = False,
 ) -> str:
     """
@@ -675,6 +705,10 @@ async def kosis_get_stock_index(
     kosis_key = os.environ.get("KOSIS_API_KEY", "")
     if not kosis_key:
         return json.dumps({"error": "KOSIS_API_KEY 환경변수가 설정되지 않았습니다."}, ensure_ascii=False)
+
+    # MCP 런타임이 숫자를 int로 전달하는 경우 대비
+    start_date = str(start_date)
+    end_date = str(end_date)
 
     if index_type not in _KOSIS_KRX_TBL:
         return json.dumps(

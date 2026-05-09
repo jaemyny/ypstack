@@ -2,7 +2,7 @@
 
 import json
 import os
-from typing import Optional
+from typing import Optional, Union
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -70,7 +70,7 @@ def _get_kosis_key() -> Optional[str]:
 
 @mcp.tool(annotations=_TOOL_ANNOTATIONS)
 async def seoul_get_subway_ridership(
-    year: str,
+    year: Union[str, int],
     line: Optional[str] = None,
 ) -> str:
     """전국 지하철 노선별 연간 수송인원 통계 조회 (KOSIS).
@@ -225,7 +225,7 @@ async def seoul_get_bus_route_info(bus_number: str) -> str:
 @mcp.tool(annotations=_TOOL_ANNOTATIONS)
 async def kosis_get_transit_stats(
     keyword: str = "교통",
-    year: Optional[str] = None,
+    year: Optional[Union[str, int]] = None,
     region: Optional[str] = None,
 ) -> str:
     """KOSIS 교통 관련 통계표 검색.
@@ -272,11 +272,13 @@ async def kosis_get_transit_stats(
             "count": len(items),
             "stats": [
                 {
-                    "org_id": item.get("orgId", ""),
-                    "table_id": item.get("tblId", ""),
-                    "table_nm": item.get("tblNm", ""),
-                    "org_nm": item.get("orgNm", ""),
-                    "stats_knd": item.get("statsKnd", ""),
+                    # statisticsSearch.do는 UPPERCASE 필드명 사용
+                    "org_id":    item.get("ORG_ID",   "") or item.get("orgId",   ""),
+                    "table_id":  item.get("TBL_ID",   "") or item.get("tblId",   ""),
+                    "table_nm":  item.get("TBL_NM",   "") or item.get("tblNm",   ""),
+                    "org_nm":    item.get("ORG_NM",   "") or item.get("orgNm",   ""),
+                    "stats_knd": item.get("STATS_KND","") or item.get("statsKnd",""),
+                    "period":    f"{item.get('STRT_PRD_DE','')}~{item.get('END_PRD_DE','')}",
                 }
                 for item in items
             ],

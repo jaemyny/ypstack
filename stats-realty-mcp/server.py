@@ -651,8 +651,13 @@ def _kb_df_to_json(
     if df is None:
         return json.dumps(
             {
-                "error": f"지역코드 '{region_code}'에 대한 KB 데이터를 불러오지 못했습니다. "
-                         "KB부동산 API는 광역시도 단위 일부만 지원합니다.",
+                "error": f"지역코드 '{region_code}'에 대한 KB 데이터를 불러오지 못했습니다.",
+                "hint": (
+                    "PublicDataReader의 KB API가 해당 매개변수 조합(주기/매물종별/거래유형/지역)을 "
+                    "지원하지 않거나 일시적으로 응답이 비어 있습니다. "
+                    "다른 KB 도구(kb_get_average_price, kb_get_median_price, kb_get_market_trend 등)는 "
+                    "동일 region_code로 정상 작동할 수 있으니 시도해 보세요."
+                ),
                 **_KB_REGION_HINT,
                 "stat_type": stat_type,
                 "region_code": region_code,

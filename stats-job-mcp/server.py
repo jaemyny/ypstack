@@ -60,9 +60,32 @@ def _check_kosis_key() -> Optional[str]:
 def _filter_by_region(items: list, region: Optional[str]) -> list:
     if not region:
         return items
+    region_norm = region.strip()
+    # "전국" / "전체" → 필터 미적용 (해당 표가 시도 단위만 가지면 빈 결과 방지)
+    if region_norm in ("전국", "전체", "ALL", "all"):
+        return items
+    # 표준 시도 약칭 → 정식명 매핑
+    sido_aliases = {
+        "서울": ("서울특별시",),
+        "부산": ("부산광역시",), "대구": ("대구광역시",), "인천": ("인천광역시",),
+        "광주": ("광주광역시",), "대전": ("대전광역시",), "울산": ("울산광역시",),
+        "세종": ("세종특별자치시",),
+        "경기": ("경기도",), "강원": ("강원특별자치도", "강원도"),
+        "충북": ("충청북도",), "충남": ("충청남도",),
+        "전북": ("전북특별자치도", "전라북도"), "전남": ("전라남도",),
+        "경북": ("경상북도",), "경남": ("경상남도",), "제주": ("제주특별자치도",),
+    }
+    candidates = sido_aliases.get(region_norm, ())
+    exact = [
+        it for it in items
+        if it.get("C1_NM", "") == region_norm
+        or it.get("C1_NM", "") in candidates
+    ]
+    if exact:
+        return exact
     return [
         it for it in items
-        if region in it.get("C1_NM", "") or region in it.get("C1_NM_ENG", "")
+        if region_norm in it.get("C1_NM", "") or region_norm in it.get("C1_NM_ENG", "")
     ]
 
 
