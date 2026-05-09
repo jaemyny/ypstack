@@ -38,13 +38,35 @@ def _ecos_date(d: str, cycle: str = "M") -> str:
         return d + "01"
     return d
 
-# stat_code별 아이템코드+기본주기 매핑
+# stat_code별 기본 아이템코드+주기 매핑
+# 주의: 시장금리 일별(817Y002)은 단일 item_code로 다양한 채권/금리 시계열을 갖고 있음.
+#      국고채/CD/콜금리 등 구체적 시계열을 원하면 item_code 파라미터를 직접 지정하세요.
+# 731Y001/003/005는 환율(원/달러·위안·엔) 데이터입니다 — 금리 아님!
 ECOS_ITEM_MAP = {
-    "722Y001": ("0101000", "M"),   # 기준금리 (월별 집계 가능)
-    "817Y002": ("0000000", "D"),   # CD금리 (일별)
-    "121Y006": ("BECBLA01", "M"),  # 예금은행 대출금리(신규)
-    "731Y003": ("5000000", "D"),   # 국고채 3년 (일별)
-    "731Y005": ("5020000", "D"),   # 국고채 10년 (일별)
+    "722Y001": ("0101000",   "M"),   # 한국은행 기준금리 (월별)
+    "121Y006": ("BECBLA01",  "M"),   # 예금은행 대출금리/COFIX (월별)
+    "817Y002": ("010101000", "D"),   # 시장금리 일별 — 기본 item_code=콜금리(1일)
+}
+
+# 시장금리 일별(817Y002) 주요 item_code 매핑 (alias→item_code)
+ECOS_RATE_ITEM_MAP = {
+    "콜금리":      "010101000",  # 콜금리(1일, 전체거래)
+    "국고채1":     "010190000",  # 국고채(1년)
+    "국고채2":     "010195000",  # 국고채(2년)
+    "국고채3":     "010200000",  # 국고채(3년)
+    "국고채5":     "010200001",  # 국고채(5년)
+    "국고채10":    "010210000",  # 국고채(10년)
+    "국고채20":    "010220000",  # 국고채(20년)
+    "국고채30":    "010230000",  # 국고채(30년)
+    "회사채AA":    "010300000",  # 회사채(3년, AA-)
+    "회사채BBB":   "010320000",  # 회사채(3년, BBB-)
+    "CD91":        "010502000",  # CD(91일)
+    "CP91":        "010503000",  # CP(91일)
+    "통안채2":     "010400002",  # 통안증권(2년)
+    "KORIBOR3M":   "010150000",
+    "KORIBOR6M":   "010151000",
+    "KORIBOR12M":  "010152000",
+    "KOFR":        "010901000",  # KOFR 공시RFR
 }
 
 
@@ -115,22 +137,30 @@ async def ecos_get_interest_rate(
     start_date: Union[str, int],
     end_date: Union[str, int],
     stat_code: Optional[str] = "722Y001",
+    item_code: Optional[str] = None,
     cycle: Optional[str] = None,
 ) -> str:
     """
     한국은행 ECOS 금리 데이터 조회.
 
     주요 stat_code:
-      722Y001 = 기준금리 (기본값, 월별)
-      817Y002 = CD금리 (91일, 일별)
-      121Y006 = COFIX (신규취급액기준, 월별)
-      731Y003 = 국고채 3년 (일별)
-      731Y005 = 국고채 10년 (일별)
+      722Y001 = 한국은행 기준금리 (월별)
+      121Y006 = 예금은행 대출금리/COFIX (월별)
+      817Y002 = 시장금리(일별) — item_code로 구체 시계열 지정
+
+    817Y002 + item_code 또는 alias (또는 직접 item_code):
+      "콜금리"=010101000,    "CD91"=010502000,   "CP91"=010503000
+      "국고채1"=010190000,   "국고채2"=010195000, "국고채3"=010200000,
+      "국고채5"=010200001,   "국고채10"=010210000, "국고채20"=010220000,
+      "회사채AA"=010300000,  "회사채BBB"=010320000, "KOFR"=010901000
+
+    ※ 731Y001/003/005 는 환율(원/달러·위안·엔) 통계로, 금리 아님!
 
     Args:
-        start_date: 시작일 YYYYMM (예: "202301")
-        end_date: 종료일 YYYYMM (예: "202412")
+        start_date: 시작일 YYYYMM (예: "202301") 또는 일별이면 YYYYMMDD
+        end_date: 종료일 YYYYMM 또는 YYYYMMDD
         stat_code: 통계코드 (기본 722Y001 = 기준금리)
+        item_code: 항목코드 또는 alias (예: "국고채3", "010200000"). 미지정 시 stat_code 기본값
         cycle: 주기 D/M/Q/Y (미입력 시 stat_code 기본값 사용)
 
     Returns:
@@ -145,7 +175,12 @@ async def ecos_get_interest_rate(
     start_date = str(start_date)
     end_date = str(end_date)
 
-    item_code, default_cycle = ECOS_ITEM_MAP.get(stat_code, ("", "M"))
+    default_item_code, default_cycle = ECOS_ITEM_MAP.get(stat_code, ("", "M"))
+    # item_code: alias("국고채3" 등) → 실제 코드, 직접 코드 입력도 허용
+    if item_code:
+        item_code = ECOS_RATE_ITEM_MAP.get(item_code, item_code)
+    else:
+        item_code = default_item_code
     use_cycle = cycle or default_cycle
     s = _ecos_date(start_date, use_cycle)
     e = _ecos_date(end_date, use_cycle)

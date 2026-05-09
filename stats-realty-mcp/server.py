@@ -536,84 +536,32 @@ async def kb_get_price_stats(
     region_code: str = "11",
     period: Optional[int] = 12,
 ) -> str:
-    """KB부동산 가격통계를 조회합니다 (PublicDataReader, API 키 불필요).
-    DEPRECATED: kb_get_price_index / kb_get_hai / kb_get_pir 개별 도구 사용을 권장합니다.
+    """[DEPRECATED] KB부동산 가격통계 통합 도구.
 
-    Args:
-        stat_type: 통계 유형 ("매매지수", "전세지수", "HAI", "PIR" 중 하나, 기본 "매매지수")
-        region_code: 지역코드 (예: "11"=서울, "41"=경기, 기본 "11")
-        period: 최근 N개월 (기본 12)
+    ⚠️ 이 도구는 deprecated 되었습니다. 다음 개별 도구를 사용하세요:
+      • stat_type="매매지수"/"전세지수" → KB 서버측 거부로 사용 불가.
+        대안: kb_get_price_index_change_rate / kb_get_lead50 / kb_get_average_price
+      • stat_type="HAI"  → kb_get_hai 직접 호출 권장
+      • stat_type="PIR"  → kb_get_pir 직접 호출 권장
     """
-    if not HAS_KBLAND:
-        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
-    try:
-        import pandas as pd
-        api = Kbland()
-        if stat_type == "매매지수":
-            df = api.get_price_index(
-                월간주간구분코드="01",
-                매물종별구분="01",
-                매매전세코드="01",
-                지역코드=region_code,
-                기간=str(period),
-            )
-        elif stat_type == "전세지수":
-            df = api.get_price_index(
-                월간주간구분코드="01",
-                매물종별구분="01",
-                매매전세코드="02",
-                지역코드=region_code,
-                기간=str(period),
-            )
-        elif stat_type == "HAI":
-            df = api.get_hai(지역코드=region_code, 기간=str(period))
-        elif stat_type == "PIR":
-            df = api.get_pir("01", 지역코드=region_code, 기간=str(period))
-        else:
-            return f"오류: 지원하지 않는 stat_type입니다. ('매매지수', '전세지수', 'HAI', 'PIR' 중 하나를 선택하세요)"
-
-        # PublicDataReader가 None 반환하는 경우 (지원하지 않는 지역코드)
-        if df is None:
-            return json.dumps({
-                "error": (
-                    f"지역코드 '{region_code}'에 대한 KB부동산 데이터를 불러오지 못했습니다. "
-                    "KB부동산 API는 광역시도 단위 일부만 지원합니다."
-                ),
-                "supported_codes": {
-                    "11": "서울특별시", "21": "부산광역시", "22": "대구광역시",
-                    "23": "인천광역시", "24": "광주광역시", "25": "대전광역시",
-                    "26": "울산광역시", "29": "세종특별자치시",
-                    "주의": "경기(41/42), 강원, 충청, 전라, 경상 등 도단위는 KB API에서 미지원될 수 있습니다.",
-                },
+    return json.dumps(
+        {
+            "error": "kb_get_price_stats는 deprecated 되었습니다.",
+            "deprecated": True,
+            "redirect_map": {
+                "매매지수": "kb_get_price_index_change_rate / kb_get_lead50 / kb_get_average_price",
+                "전세지수": "kb_get_price_index_change_rate(deal_type='전세') / kb_get_average_price(deal_type='전세')",
+                "HAI":      "kb_get_hai",
+                "PIR":      "kb_get_pir",
+            },
+            "requested": {
                 "stat_type": stat_type,
                 "region_code": region_code,
-            }, ensure_ascii=False, indent=2)
-
-        # 지역코드 필터 (API가 region_code를 무시하는 경우 대응)
-        region_cols = [c for c in df.columns if "지역코드" in c]
-        if region_cols:
-            rc = region_cols[0]
-            df = df[df[rc].astype(str).str.startswith(region_code.zfill(2))].copy()
-
-        # 날짜 컬럼으로 최근 N개월만 자르기 (기간 파라미터가 무시되는 API 대응)
-        date_cols = [c for c in df.columns if "날짜" in c or "date" in c.lower() or "ym" in c.lower()]
-        if date_cols and period:
-            dc = date_cols[0]
-            df[dc] = pd.to_datetime(df[dc], errors="coerce")
-            cutoff = pd.Timestamp.now() - pd.DateOffset(months=period)
-            df = df[df[dc] >= cutoff].copy()
-            df[dc] = df[dc].dt.strftime("%Y-%m")
-
-        result = json.loads(df.to_json(orient="records", force_ascii=False))
-        return json.dumps({
-            "stat_type": stat_type,
-            "region_code": region_code,
-            "period_months": period,
-            "count": len(result),
-            "data": result,
-        }, ensure_ascii=False)
-    except Exception as e:
-        return _err(e)
+                "period": period,
+            },
+        },
+        ensure_ascii=False, indent=2,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -711,40 +659,39 @@ async def kb_get_price_index(
     region_code: str = "11",
     period: Optional[int] = 12,
 ) -> str:
-    """KB부동산 주택가격지수를 조회합니다 (PublicDataReader, API 키 불필요).
-    엑셀 매핑: 월간 1~8, 주간 3~4
+    """[DEPRECATED] KB부동산 주택가격지수.
+
+    ⚠️ KB부동산 서버에서 이 엔드포인트(/data/quick/getPriceIndex)가 거부되어
+       현재 데이터를 가져올 수 없습니다 (RemoteDisconnected). 라이브러리 또는
+       서버 측 문제이며 코드로 해결 불가합니다.
+
+    **권장 대안 (의미가 다름에 유의):**
+      • 시장 동향 파악(상승/하락):  kb_get_price_index_change_rate (가격지수 증감률, 작동 확인)
+      • 가격지수 개념의 절대값:     kb_get_lead50 (선도50지수, 작동 확인)
+      • 면적별 가격지수 (소/중/대): kb_get_price_index_by_area (작동 확인)
+      • 실제 평균가격(원):           kb_get_average_price (작동 확인)
 
     Args:
-        cycle: 주기 ("monthly"=월간, "weekly"=주간, 기본 "monthly")
-        property_type: 매물종별 ("APT", "연립", "단독", "종합", 기본 "APT")
-              ※ APT 외 매물종별은 월간 데이터만 지원됩니다.
-        deal_type: 거래유형 ("매매" 또는 "전세", 기본 "매매")
-        region_code: 지역코드 (예: "11"=서울, 기본 "11")
-        period: 최근 N개월·회차 (기본 12)
+        cycle, property_type, deal_type, region_code, period: (호환용 — 실제로는 사용 안 됨)
     """
-    if not HAS_KBLAND:
-        return "오류: PublicDataReader 미설치. pip install PublicDataReader"
-    cycle_c = _KB_CYCLE_CODE.get(cycle)
-    if not cycle_c:
-        return json.dumps({"error": f"지원하지 않는 cycle: {cycle}. ('monthly' 또는 'weekly')"}, ensure_ascii=False, indent=2)
-    prop_c = _KB_PROPERTY_CODE.get(property_type)
-    if not prop_c:
-        return json.dumps({"error": f"지원하지 않는 property_type: {property_type}. ('APT','연립','단독','종합')"}, ensure_ascii=False, indent=2)
-    deal_c = _KB_DEAL_CODE.get(deal_type)
-    if not deal_c:
-        return json.dumps({"error": f"지원하지 않는 deal_type: {deal_type}. ('매매' 또는 '전세')"}, ensure_ascii=False, indent=2)
-    try:
-        api = Kbland()
-        df = api.get_price_index(
-            월간주간구분코드=cycle_c,
-            매물종별구분=prop_c,
-            매매전세코드=deal_c,
-            지역코드=region_code,
-            기간=str(period) if period else "12",
-        )
-        return _kb_df_to_json(df, f"가격지수({cycle}/{property_type}/{deal_type})", region_code, period)
-    except Exception as e:
-        return _err(e)
+    return json.dumps(
+        {
+            "error": "kb_get_price_index는 KB 서버측 엔드포인트 거부로 현재 사용할 수 없습니다.",
+            "deprecated": True,
+            "alternatives": [
+                {"tool": "kb_get_price_index_change_rate", "purpose": "시장 동향(증감률) — 상승/하락 추세 파악"},
+                {"tool": "kb_get_lead50",                  "purpose": "선도50지수 — 가격지수 절대값과 가장 유사"},
+                {"tool": "kb_get_price_index_by_area",     "purpose": "면적별 가격지수 (소형~대형 5분류)"},
+                {"tool": "kb_get_average_price",           "purpose": "실제 평균가격 (원 단위)"},
+            ],
+            "diagnosis": "PublicDataReader.Kbland().get_price_index() → RemoteDisconnected. KB 서버측 차단 추정.",
+            "requested_params": {
+                "cycle": cycle, "property_type": property_type, "deal_type": deal_type,
+                "region_code": region_code, "period": period,
+            },
+        },
+        ensure_ascii=False, indent=2,
+    )
 
 
 # ---------------------------------------------------------------------------
