@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_comment": "Layer 2 — 모노레포 안전 hook. 작업 scope 와 위험한 git 명령을 OS 수준에서 강제. 자세한 규칙은 ../CLAUDE.md 참조.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $CLAUDE_PROJECT_DIR/scripts/hooks/check-edit-scope.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $CLAUDE_PROJECT_DIR/scripts/hooks/check-git-safety.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

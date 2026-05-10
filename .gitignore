@@ -19,3 +19,9 @@ Thumbs.db
 .idea/
 *.swp
 *~
+
+# yp-session (per-worktree scope marker, never commit)
+.yp-session-scope
+
+# Claude Code local overrides
+.claude/settings.local.json
