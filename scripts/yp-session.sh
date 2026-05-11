@@ -9,8 +9,8 @@
 #   yp-session.sh clean <name>         # worktree 정리
 #
 # 사전 정의 그룹:
-#   stats   = 모든 stats-* MCP (자동 glob)
-#   realty  = stats-realty-mcp + kb-price-mcp (부동산 작업)
+#   stats   = 데이터 MCP 일괄 — stats-* (자동 glob) + kb-price-mcp
+#   realty  = stats-realty-mcp + kb-price-mcp (부동산 통합 작업, 좁은 범위)
 #   all     = 모든 MCP (전체 점검용, 신중히 사용)
 #
 # 동작 (단일 또는 그룹 모두 동일):
@@ -30,8 +30,12 @@ resolve_group() {
     local name="$1"
     case "$name" in
         stats)
-            # 자동 glob: stats-* 패턴
-            ls -d "$YPSTACK"/stats* 2>/dev/null | xargs -n1 basename | sort | tr '\n' ',' | sed 's/,$//'
+            # 데이터 MCP 일괄: stats-* 자동 glob + kb-price-mcp
+            # (kb-price 는 부동산 데이터 MCP 라 일괄 테스트 시 함께 다루는 게 자연스럽다)
+            {
+                ls -d "$YPSTACK"/stats* 2>/dev/null | xargs -n1 basename
+                [ -d "$YPSTACK/kb-price-mcp" ] && echo "kb-price-mcp"
+            } | sort -u | tr '\n' ',' | sed 's/,$//'
             ;;
         realty)
             echo "stats-realty-mcp,kb-price-mcp"
@@ -195,8 +199,8 @@ yp-session — ypstack 격리 작업 세션
   yp-session.sh clean <name>       # worktree 정리
 
 사전 정의 그룹:
-  stats   — 모든 stats-* MCP $(resolve_group stats | tr ',' ' ' | wc -w | tr -d ' ')개
-  realty  — stats-realty-mcp + kb-price-mcp
+  stats   — 데이터 MCP 일괄: stats-* + kb-price-mcp ($(resolve_group stats | tr ',' ' ' | wc -w | tr -d ' ')개)
+  realty  — stats-realty-mcp + kb-price-mcp (부동산 통합, 좁은 범위)
   all     — 모든 MCP
 
 사용 가능한 subdir:
