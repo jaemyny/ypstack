@@ -372,9 +372,9 @@ async def reb_get_commercial_rent(
 
     rows = data if isinstance(data, list) else []
 
-    # region 부분일치 필터
+    # region 부분일치 필터 (양방향: 서울 in 서울특별시, 서울특별시 in 서울)
     if region:
-        rows = [r for r in rows if region in r.get("C1_NM", "")]
+        rows = [r for r in rows if region in r.get("C1_NM", "") or r.get("C1_NM", "") in region]
 
     parsed = [
         {

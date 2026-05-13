@@ -524,12 +524,37 @@ async def molit_get_housing_permit(
 
 
 # ---------------------------------------------------------------------------
-# 도구 7: 한국부동산원 아파트 가격지수 (KOSIS 경유 — orgId=408)
+# 도구 7: 한국부동산원 아파트 가격지수 — 주간 (KOSIS orgId=408)
 # ---------------------------------------------------------------------------
 
+# 주간 아파트 가격지수 테이블 (A/B 버전 동일 데이터, B가 최신)
 _REB_TBL = {
-    "매매": ("408", "DT_304004_WEEK_002_B"),  # 주간 아파트 매매가격지수
-    "전세": ("408", "DT_304004_WEEK_004_A"),  # 주간 아파트 전세가격지수
+    "매매":       ("408", "DT_304004_WEEK_002_B"),  # 주간 아파트 매매가격지수
+    "전세":       ("408", "DT_304004_WEEK_004_A"),  # 주간 아파트 전세가격지수
+    "매매변동률":  ("408", "DT_304004_WEEK_001_B"),  # 주간 아파트 매매가격지수 변동률
+    "전세변동률":  ("408", "DT_304004_WEEK_003_B"),  # 주간 아파트 전세가격지수 변동률
+}
+
+# 월간 주택/아파트 가격지수 테이블 (KOSIS orgId=101, 시도/시/군/구 단위)
+_REB_MONTHLY_TBL = {
+    "아파트매매":     ("101", "DT_1YL20162E"),   # 아파트 매매가격지수
+    "아파트전세":     ("101", "DT_1YL20172E"),   # 아파트 전세가격지수
+    "아파트월세통합": ("101", "DT_1YL20182E"),   # 아파트 월세통합가격지수
+    "아파트월세":     ("101", "DT_1YL20192E"),   # 아파트 월세가격지수
+    "주택매매":       ("101", "DT_1YL13502E"),   # 주택(종합) 매매가격지수
+    "주택전세":       ("101", "DT_1YL13602E"),   # 주택(종합) 전세가격지수
+    "주택월세통합":   ("101", "DT_1YL20142E"),   # 주택(종합) 월세통합가격지수
+    "주택월세":       ("101", "DT_1YL20152E"),   # 주택(종합) 월세가격지수
+}
+
+# 주택 매매 거래 현황 테이블 (KOSIS orgId=408)
+_REB_TRADE_TBL = {
+    "행정구역별":    ("408", "DT_408_2006_S0057"),  # 행정구역별 주택매매거래현황
+    "주택유형별":    ("408", "DT_408_2006_S0061"),  # 주택유형별 주택매매거래현황
+    "매입자거주지별": ("408", "DT_408_2006_S0058"), # 매입자거주지별 주택매매거래현황
+    "거래주체별":    ("408", "DT_408_2006_S0059"),  # 거래주체별 주택매매거래현황
+    "거래규모별":    ("408", "DT_408_2006_S0060"),  # 거래규모별 주택매매거래현황
+    "매입자연령대별": ("408", "DT_408_2006_S0076"), # 매입자연령대별 주택매매거래현황
 }
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
@@ -540,11 +565,14 @@ async def reb_get_price_index(
     price_type: Optional[str] = None,
     region_code: Optional[str] = None,
 ) -> str:
-    """한국부동산원 아파트 가격지수를 조회합니다 (KOSIS 한국부동산원, 주간).
+    """한국부동산원 주간 아파트 가격지수를 조회합니다. (KOSIS orgId=408)
+
+    주간 단위 아파트 가격지수/변동률을 제공합니다.
+    월간 시도·구 단위 지수가 필요하면 reb_get_monthly_price_index를 사용하세요.
 
     Args:
         year_month: 조회년월 (YYYYMM, 예: "202503") — 해당 월의 주간 데이터를 반환
-        stat_type: 통계 유형 ("매매" 또는 "전세", 기본 "매매")
+        stat_type: 통계 유형 — "매매" | "전세" | "매매변동률" | "전세변동률" (기본 "매매")
         region: 지역명 필터 (선택, 예: "서울", "수도권", "전국")
         price_type: stat_type 친화 alias (예: "매매" / "전세")
         region_code: (호환용 — 시도 코드. KOSIS C1_NM과 매칭되지 않으므로 region 사용 권장)
@@ -624,6 +652,183 @@ async def reb_get_price_index(
             "stat_type": stat_type,
             "year_month": year_month,
             "source": f"KOSIS 한국부동산원 ({tbl_id})",
+            "count": len(result_rows),
+            "data": result_rows,
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# 도구 7-B: 한국부동산원 월간 부동산 가격지수 (KOSIS orgId=101, 시도/시/군/구)
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def reb_get_monthly_price_index(
+    stat_type: str = "아파트매매",
+    start_ym: Optional[Union[str, int]] = None,
+    end_ym: Optional[Union[str, int]] = None,
+    region: Optional[str] = None,
+    housing_type: Optional[str] = None,
+) -> str:
+    """한국부동산원 월간 부동산 가격지수를 시도·시·군·구 단위로 조회합니다. (KOSIS orgId=101)
+
+    아파트·주택 전체의 매매·전세·월세 가격지수를 제공합니다.
+    주간 지수가 필요하면 reb_get_price_index를 사용하세요.
+
+    Args:
+        stat_type: 통계 유형.
+            아파트: "아파트매매" | "아파트전세" | "아파트월세통합" | "아파트월세"
+            주택전체: "주택매매" | "주택전세" | "주택월세통합" | "주택월세"
+        start_ym: 시작 연월 (YYYYMM, 예: "202501"). 없으면 end_ym 기준 단일 월
+        end_ym: 종료 연월 (YYYYMM, 예: "202503"). 필수
+        region: 지역 필터 (예: "서울", "서울특별시", "강남구"). 없으면 전국 전체 반환
+        housing_type: 주택유형 필터 — "아파트", "단독주택", "연립다세대", "종합". 없으면 전체
+    """
+    if not KOSIS_API_KEY:
+        return "오류: KOSIS_API_KEY 환경변수가 설정되지 않았습니다."
+    if stat_type not in _REB_MONTHLY_TBL:
+        return json.dumps({
+            "error": f"지원하지 않는 stat_type: '{stat_type}'",
+            "valid": list(_REB_MONTHLY_TBL.keys()),
+        }, ensure_ascii=False, indent=2)
+    if end_ym is None and start_ym is None:
+        return json.dumps({
+            "error": "start_ym 또는 end_ym이 필요합니다 (YYYYMM, 예: '202503')",
+        }, ensure_ascii=False, indent=2)
+
+    org_id, tbl_id = _REB_MONTHLY_TBL[stat_type]
+    s_ym = str(start_ym).strip() if start_ym else str(end_ym).strip()
+    e_ym = str(end_ym).strip() if end_ym else s_ym
+
+    try:
+        url = f"{KOSIS_BASE}/Param/statisticsParameterData.do"
+        params = {
+            "method": "getList",
+            "apiKey": KOSIS_API_KEY,
+            "orgId": org_id,
+            "tblId": tbl_id,
+            "itmId": "ALL",
+            "objL1": "ALL",
+            "objL2": "ALL",
+            "prdSe": "M",
+            "startPrdDe": s_ym,
+            "endPrdDe": e_ym,
+            "format": "json",
+            "jsonVD": "Y",
+        }
+        data = await _get_json(url, params)
+        if isinstance(data, dict) and data.get("err"):
+            return json.dumps(
+                {"error": f"KOSIS 오류 {data['err']}: {data.get('errMsg', '')}"},
+                ensure_ascii=False, indent=2,
+            )
+
+        rows = data if isinstance(data, list) else []
+        if region:
+            rows = [r for r in rows if region in r.get("C1_NM", "") or r.get("C1_NM", "") in region]
+        if housing_type:
+            rows = [r for r in rows if housing_type in r.get("C2_NM", "")]
+
+        result_rows = [
+            {
+                "region": r.get("C1_NM", ""),
+                "housing_type": r.get("C2_NM", ""),
+                "period": r.get("PRD_DE", ""),
+                "index": r.get("DT", ""),
+                "unit": r.get("UNIT_NM", ""),
+                "item": r.get("ITM_NM", ""),
+            }
+            for r in rows
+        ]
+        return json.dumps({
+            "stat_type": stat_type,
+            "period": f"{s_ym}~{e_ym}",
+            "source": f"KOSIS 한국부동산원 ({tbl_id})",
+            "region_filter": region,
+            "housing_type_filter": housing_type,
+            "count": len(result_rows),
+            "data": result_rows,
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
+# 도구 7-C: 한국부동산원 주택 매매 거래 현황 (KOSIS orgId=408)
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def reb_get_housing_trade(
+    trade_type: str = "행정구역별",
+    year_month: Optional[Union[str, int]] = None,
+    region: Optional[str] = None,
+) -> str:
+    """한국부동산원 주택 매매 거래 현황을 조회합니다. (KOSIS orgId=408)
+
+    지역·유형·연령·거주지별 주택 매매 거래 건수를 제공합니다.
+
+    Args:
+        trade_type: 조회 유형.
+            "행정구역별" | "주택유형별" | "매입자거주지별" | "거래주체별" | "거래규모별" | "매입자연령대별"
+        year_month: 조회 연월 (YYYYMM, 예: "202503"). 없으면 최근 전체 데이터
+        region: 지역 필터 (예: "서울", "경기"). 없으면 전국
+    """
+    if not KOSIS_API_KEY:
+        return "오류: KOSIS_API_KEY 환경변수가 설정되지 않았습니다."
+    if trade_type not in _REB_TRADE_TBL:
+        return json.dumps({
+            "error": f"지원하지 않는 trade_type: '{trade_type}'",
+            "valid": list(_REB_TRADE_TBL.keys()),
+        }, ensure_ascii=False, indent=2)
+
+    org_id, tbl_id = _REB_TRADE_TBL[trade_type]
+
+    try:
+        url = f"{KOSIS_BASE}/Param/statisticsParameterData.do"
+        params = {
+            "method": "getList",
+            "apiKey": KOSIS_API_KEY,
+            "orgId": org_id,
+            "tblId": tbl_id,
+            "itmId": "ALL",
+            "objL1": "ALL",
+            "prdSe": "M",
+            "format": "json",
+            "jsonVD": "Y",
+        }
+        if year_month:
+            ym = str(year_month).strip()
+            params["startPrdDe"] = ym
+            params["endPrdDe"] = ym
+
+        data = await _get_json(url, params)
+        if isinstance(data, dict) and data.get("err"):
+            return json.dumps(
+                {"error": f"KOSIS 오류 {data['err']}: {data.get('errMsg', '')}"},
+                ensure_ascii=False, indent=2,
+            )
+
+        rows = data if isinstance(data, list) else []
+        if region:
+            rows = [r for r in rows if region in r.get("C1_NM", "") or r.get("C1_NM", "") in region]
+
+        result_rows = [
+            {
+                "region": r.get("C1_NM", ""),
+                "category": r.get("C2_NM", ""),
+                "period": r.get("PRD_DE", ""),
+                "count": r.get("DT", ""),
+                "unit": r.get("UNIT_NM", ""),
+                "item": r.get("ITM_NM", ""),
+            }
+            for r in rows
+        ]
+        return json.dumps({
+            "trade_type": trade_type,
+            "source": f"KOSIS 한국부동산원 ({tbl_id})",
+            "region_filter": region,
+            "year_month": str(year_month) if year_month else None,
             "count": len(result_rows),
             "data": result_rows,
         }, ensure_ascii=False, indent=2)
