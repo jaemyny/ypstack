@@ -572,7 +572,8 @@ async def reb_get_price_index(
         }
         rc = str(region_code).strip()[:2]
         region = sido_code_map.get(rc)
-    region = _resolve_sido(region) if region else None
+    # KOSIS REB 주간지수 표는 C1_NM이 "서울", "수도권" 등 단축형을 사용하므로
+    # _resolve_sido 적용 없이 원본 입력값으로 부분일치 필터링한다.
 
     if stat_type not in _REB_TBL:
         return json.dumps(
@@ -607,7 +608,7 @@ async def reb_get_price_index(
 
         rows = data if isinstance(data, list) else []
         if region:
-            rows = [r for r in rows if region in r.get("C1_NM", "")]
+            rows = [r for r in rows if region in r.get("C1_NM", "") or r.get("C1_NM", "") in region]
 
         result_rows = [
             {
