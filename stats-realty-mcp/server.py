@@ -3,10 +3,10 @@
 stats-realty-mcp: 한국 부동산 실거래가 · 가격지수 · 공급 · 단지 정보
 - 국토부 RTMS: 아파트 매매/전월세/분양권전매 실거래가
 - 한국부동산원 R-ONE: 가격지수, 전세가율
-- 국토부: 공동주택 단지 목록/기본정보, 주택 인허가
+- 국토부: 공동주택 단지 목록/기본정보, 주택 인허가, 공동주택공시가격
 - KB부동산: 가격지수·HAI·PIR (PublicDataReader, 무키)
 """
-import json, os, xml.etree.ElementTree as ET
+import json, os, re, xml.etree.ElementTree as ET
 from typing import Optional, Union
 import httpx
 from pydantic import BaseModel, Field, ConfigDict
@@ -1616,6 +1616,220 @@ async def rtms_get_lawd_codes(region: str = "") -> str:
         "count": len(filtered),
         "results": filtered,
     }, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# 도구 28: 공동주택공시가격 조회
+# ---------------------------------------------------------------------------
+
+APT_OFFICIAL_PRICE_URL = "http://apis.data.go.kr/1613000/AptPublpricInfoService1/getAptPublprcInfo"
+
+# 주요 시군구 코드 (서울 전체 + 경기·광역시 주요 구)
+_SIGUNGU_CODE_EXT = {
+    **SEOUL_SIGUNGU_CODE,
+    # 경기
+    "성남시수정구": "41131", "성남시중원구": "41133", "성남시분당구": "41135",
+    "수원시장안구": "41111", "수원시권선구": "41113", "수원시팔달구": "41115", "수원시영통구": "41117",
+    "용인시처인구": "41461", "용인시기흥구": "41463", "용인시수지구": "41465",
+    "안양시만안구": "41171", "안양시동안구": "41173",
+    "고양시덕양구": "41281", "고양시일산동구": "41285", "고양시일산서구": "41287",
+    "안산시상록구": "41271", "안산시단원구": "41273",
+    "화성시": "41590", "과천시": "41290", "하남시": "41450",
+    "부천시": "41190", "남양주시": "41360", "파주시": "41480",
+    "의왕시": "41430", "군포시": "41410", "광명시": "41210",
+    "평택시": "41220", "시흥시": "41390", "의정부시": "41150",
+    # 부산
+    "해운대구": "26350", "수영구": "26380", "부산진구": "26230",
+    "남구": "26290", "동래구": "26260", "연제구": "26370",
+    "사하구": "26380", "기장군": "26710",
+    # 대구
+    "수성구": "27260", "달서구": "27290", "달성군": "27710",
+    # 인천
+    "연수구": "28185", "남동구": "28200", "서구": "28237", "부평구": "28237",
+    # 대전
+    "서구": "30170", "유성구": "30200",
+    # 광주
+    "광산구": "29200",
+}
+
+
+def _resolve_sigungu_from_address(address: str) -> tuple[Optional[str], Optional[str]]:
+    """지번/도로명 주소 문자열에서 (sigungu_cd, apt_name_hint) 추출.
+
+    '강남구', '성남시분당구' 등 시군구 이름을 탐색한다. 더 긴 이름이 먼저 매칭되도록
+    길이 내림차순 정렬한다.
+    """
+    sorted_entries = sorted(_SIGUNGU_CODE_EXT.items(), key=lambda x: len(x[0]), reverse=True)
+    for dist_name, code in sorted_entries:
+        if dist_name in address:
+            idx = address.find(dist_name)
+            remainder = address[idx + len(dist_name):].strip()
+            parts = remainder.split()
+            apt_parts = []
+            for p in parts:
+                # 숫자·번지(N-N)·도로명 suffix·행정동명 제거
+                if re.match(r'^[\d\-]+$', p):
+                    continue
+                if re.search(r'(로|길|대로|번지)$', p):
+                    continue
+                # '삼성동', '역삼동' 같이 행정동 접미사 '동' 으로 끝나고 짧으면 제외
+                if re.match(r'^.{2,4}동$', p):
+                    continue
+                apt_parts.append(p)
+            apt_hint = apt_parts[0] if apt_parts else None
+            return code, apt_hint
+    return None, None
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def molit_get_apt_official_price(
+    pub_year: Union[str, int],
+    address: Optional[str] = None,
+    apt_name: Optional[str] = None,
+    dong_nm: Optional[str] = None,
+    ho_nm: Optional[str] = None,
+    kapt_code: Optional[str] = None,
+) -> str:
+    """공동주택공시가격을 조회합니다.
+
+    아파트 주소(지번/도로명 모두 지원)와 동·호수로 해당 연도의 공동주택 공시가격을
+    반환합니다. 주소에서 시군구와 단지명을 자동 추출합니다.
+
+    Args:
+        pub_year: 공시연도 (YYYY, 예: "2025"). 필수. 공시가격은 매년 4월 말 공시.
+        address: 아파트 주소 (지번 또는 도로명). 단지명 포함 권장.
+                 예: "서울 강남구 래미안삼성1차"
+                     "서울 강남구 삼성동 169 래미안삼성1차"
+                     "서울 강남구 삼성로 55 래미안삼성1차"
+                 kapt_code 직접 지정 시 생략 가능.
+        apt_name: 단지명. address와 별도로 지정하면 검색 정확도 향상.
+                  예: "래미안삼성1차"
+        dong_nm: 동명 필터 (예: "101동"). 지정 시 해당 동만 반환.
+        ho_nm: 호수 필터 (예: "1001"). 지정 시 해당 호수만 반환.
+        kapt_code: 단지코드 직접 지정. apt_search_complex 결과의 kaptCode 사용.
+                   지정 시 address 조회 생략.
+    """
+    if not DATA_GO_KR_KEY:
+        return "오류: DATA_GO_KR_KEY 환경변수가 설정되지 않았습니다."
+
+    pub_year = str(pub_year).strip()
+
+    # --- Step 1: kapt_code 결정 ---
+    if not kapt_code:
+        if not address and not apt_name:
+            return json.dumps({
+                "error": "address 또는 kapt_code 중 하나는 필수입니다.",
+                "hint": "address 예: '서울 강남구 래미안삼성1차'. 또는 apt_search_complex로 kaptCode 조회 후 kapt_code 파라미터에 지정하세요.",
+            }, ensure_ascii=False, indent=2)
+
+        sigungu_cd, apt_hint = _resolve_sigungu_from_address(address or "")
+        search_name = apt_name or apt_hint
+
+        if not sigungu_cd:
+            return json.dumps({
+                "error": "주소에서 시군구를 인식하지 못했습니다.",
+                "hint": "주소에 '강남구', '성남시분당구' 등의 시군구 이름을 포함하거나, apt_search_complex로 kaptCode를 조회 후 kapt_code 파라미터에 직접 지정하세요.",
+                "address_received": address,
+            }, ensure_ascii=False, indent=2)
+
+        if not search_name:
+            return json.dumps({
+                "error": "단지명을 추출하지 못했습니다.",
+                "hint": "address에 단지명을 포함하거나 apt_name 파라미터를 별도로 지정해주세요.",
+                "example": "address='서울 강남구 래미안삼성1차' 또는 apt_name='래미안삼성1차'",
+                "address_received": address,
+            }, ensure_ascii=False, indent=2)
+
+        try:
+            root = await _get_xml(APT_LIST_URL, {
+                "serviceKey": DATA_GO_KR_KEY,
+                "numOfRows": "100",
+                "pageNo": "1",
+                "sggCd": sigungu_cd,
+            })
+            items = root.findall(".//item")
+            matched = [
+                {
+                    "kaptCode": _txt(it, "kaptCode"),
+                    "kaptName": _txt(it, "kaptName"),
+                    "kaptAddr": _txt(it, "kaptAddr"),
+                }
+                for it in items
+                if search_name in _txt(it, "kaptName")
+            ]
+        except Exception as e:
+            return _err(e, "단지 검색 중 오류")
+
+        if not matched:
+            return json.dumps({
+                "error": f"'{search_name}' 단지를 찾지 못했습니다 (시군구코드={sigungu_cd}).",
+                "hint": "apt_search_complex 도구로 단지 목록을 확인 후 kapt_code 파라미터에 직접 지정하세요.",
+                "searched": {"sigungu_cd": sigungu_cd, "apt_name": search_name},
+            }, ensure_ascii=False, indent=2)
+
+        if len(matched) > 1:
+            return json.dumps({
+                "error": f"'{search_name}' 이름을 가진 단지가 {len(matched)}개 검색됩니다. kapt_code를 직접 지정해주세요.",
+                "candidates": matched,
+                "hint": "위 kaptCode 중 하나를 kapt_code 파라미터에 지정하세요.",
+            }, ensure_ascii=False, indent=2)
+
+        kapt_code = matched[0]["kaptCode"]
+
+    # --- Step 2: 공시가격 조회 ---
+    try:
+        params: dict = {
+            "serviceKey": DATA_GO_KR_KEY,
+            "kaptCode": kapt_code,
+            "pblntfYear": pub_year,
+            "numOfRows": "1000",
+            "pageNo": "1",
+        }
+        if dong_nm:
+            params["dongNm"] = dong_nm
+        if ho_nm:
+            params["hoNm"] = ho_nm
+
+        root = await _get_xml(APT_OFFICIAL_PRICE_URL, params)
+        items = root.findall(".//item")
+
+        if not items:
+            return json.dumps({
+                "error": "공시가격 데이터가 없습니다.",
+                "kapt_code": kapt_code,
+                "pub_year": pub_year,
+                "hint": "연도·단지코드를 확인하세요. 당해 공시가격은 4월 말 이후 조회 가능합니다.",
+            }, ensure_ascii=False, indent=2)
+
+        result = []
+        for item in items:
+            try:
+                area = float(_txt(item, "excluUseAr") or "0")
+            except ValueError:
+                area = 0.0
+            try:
+                price = int((_txt(item, "pblntfPc") or "0").replace(",", ""))
+            except ValueError:
+                price = 0
+            result.append({
+                "dong_nm": _txt(item, "dongNm"),
+                "ho_nm": _txt(item, "hoNm"),
+                "area_m2": area,
+                "area_pyeong": round(area / 3.305785, 1),
+                "official_price_원": price,
+                "pub_year": _txt(item, "pblntfYear") or pub_year,
+            })
+
+        return json.dumps({
+            "kapt_code": kapt_code,
+            "pub_year": pub_year,
+            "dong_nm_filter": dong_nm,
+            "ho_nm_filter": ho_nm,
+            "count": len(result),
+            "data": result,
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return _err(e, "공시가격 조회 중 오류")
 
 
 # ---------------------------------------------------------------------------
