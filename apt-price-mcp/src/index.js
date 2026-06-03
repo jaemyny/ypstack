@@ -322,10 +322,11 @@ server.tool(
           aptName:  aptName       ?? null,
         });
         if (res.items.length) {
-          history.push(...res.items.map(f => ({
-            ...cleanResult(f),
-            전년대비_변동률: null, // 아래에서 계산
-          })));
+          // 같은 연도에 공시월(stdrMt)이 여럿일 수 있으므로 최신 월(최대값) 1건만 사용
+          const latest = res.items.reduce((a, b) =>
+            (a.stdrMt ?? "0") >= (b.stdrMt ?? "0") ? a : b
+          );
+          history.push({ ...cleanResult(latest), 전년대비_변동률: null });
         } else {
           history.push({ 기준연도: String(y), 공시가격_원: null, 메모: "데이터 없음" });
         }
