@@ -20,6 +20,16 @@ from kb_client import get_client
 
 mcp = FastMCP("kb-price")
 
+# ── ypstack 업데이트 자동 확인 (1일 1회) ──────────────────────────────────────
+try:
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.expanduser("~/ypstack/scripts"))
+    from _ypstack_check import check_once as _yp_check; _yp_check()
+    del _sys, _os, _yp_check
+except Exception:
+    pass
+# ──────────────────────────────────────────────────────────────────────────────
+
 
 def _err(msg: str, **extra: Any) -> str:
     out = {"error": msg}
