@@ -1,0 +1,9 @@
+{
+  "name": "ypstack-stats-pack",
+  "version": "1.1.0",
+  "description": "부동산·통계 MCP 10종 — 실거래·가격지수·인구·금리·상권·고용·교통·학군·환경·공시가격 (Windows용)",
+  "author": {
+    "name": "유진아빠 (심재민)",
+    "email": "jaemyny@weolbu.com"
+  }
+}
