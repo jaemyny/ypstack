@@ -18,6 +18,16 @@ from pydantic import BaseModel, ConfigDict
 # ── MCP 앱 초기화 ─────────────────────────────────────────────
 mcp = FastMCP("stats-mcp")
 
+# ── ypstack 업데이트 자동 확인 (1일 1회) ──────────────────────────────────────
+try:
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.expanduser("~/ypstack/scripts"))
+    from _ypstack_check import check_once as _yp_check; _yp_check()
+    del _sys, _os, _yp_check
+except Exception:
+    pass
+# ──────────────────────────────────────────────────────────────────────────────
+
 # ── 환경변수 ──────────────────────────────────────────────────
 KOSIS_API_KEY = os.getenv("KOSIS_API_KEY", "")
 SGIS_CONSUMER_KEY = os.getenv("SGIS_CONSUMER_KEY", "")
