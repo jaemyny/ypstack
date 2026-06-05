@@ -1,16 +1,17 @@
 /**
- * apt-price-mcp: 공동주택 공시가격 조회 MCP 서버
+ * stats-pubprice-mcp: 공동주택·단독주택·토지 공시가격 조회 MCP 서버
  *
  * 동작 흐름:
  *   1. 자연어 주소 → VWorld Search API → 법정동코드(pnu 10자리) 추출
- *   2. pnu + 동/호 파라미터 → VWorld NED 속성조회 API → 공시가격 JSON
+ *   2. pnu + 파라미터 → VWorld NED 속성조회 API → 공시가격 JSON
  *   3. geometry 없음 (REST 속성 API 직접 반환) → 정제 후 리턴
  *
- * 확인된 실제 API:
- *   https://api.vworld.kr/ned/data/getApartHousingPriceAttr
- *   pnu(법정동코드 10자리), stdrYear, dongNm, hoNm, format, numOfRows, pageNo, key, domain
+ * VWorld NED 엔드포인트:
+ *   getApartHousingPriceAttr  : 공동주택(아파트) 공시가격
+ *   getIndvdHousingPriceAttr  : 개별주택가격 (단독·다가구)
+ *   getIndvdLandPriceAttr     : 개별공시지가 (토지)
  *
- * 환경변수 (.env):
+ * 환경변수:
  *   VWORLD_API_KEY  : VWorld 인증키 (필수)
  *   VWORLD_DOMAIN   : 키 발급 시 등록한 도메인 (기본: localhost)
  */
@@ -27,11 +28,11 @@ const NED_BASE = "https://api.vworld.kr/ned/data";
 const SEARCH_BASE = "https://api.vworld.kr/req/search";
 
 if (!VWORLD_KEY) {
-  process.stderr.write("[apt-price-mcp] 경고: VWORLD_API_KEY가 설정되지 않았습니다.\n");
+  process.stderr.write("[stats-pubprice-mcp] 경고: VWORLD_API_KEY가 설정되지 않았습니다.\n");
 }
 
 // ── MCP 서버 ─────────────────────────────────────────────────────────────────
-const server = new McpServer({ name: "apt-price-mcp", version: "1.1.0" });
+const server = new McpServer({ name: "stats-pubprice-mcp", version: "1.0.0" });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 유틸: VWorld Search API → 법정동코드(pnu 10자리) 추출
@@ -366,4 +367,4 @@ server.tool(
 // ─────────────────────────────────────────────────────────────────────────────
 const transport = new StdioServerTransport();
 await server.connect(transport);
-process.stderr.write("[apt-price-mcp] 서버 시작 | NED getApartHousingPriceAttr\n");
+process.stderr.write("[stats-pubprice-mcp] 서버 시작 | NED getApartHousingPriceAttr\n");

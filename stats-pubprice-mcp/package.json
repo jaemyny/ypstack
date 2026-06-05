@@ -1,7 +1,7 @@
 {
-  "name": "apt-price-mcp",
+  "name": "stats-pubprice-mcp",
   "version": "1.0.0",
-  "description": "공동주택 공시가격 조회 MCP 서버 (VWorld WFS 기반)",
+  "description": "공동주택·단독주택·토지 공시가격 조회 MCP 서버 (VWorld NED 기반)",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
