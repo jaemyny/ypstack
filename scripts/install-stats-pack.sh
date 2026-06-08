@@ -224,7 +224,10 @@ if pubprice_ok:
     new_servers["stats-pubprice"] = {
         "command": "node",
         "args": [f"{ypstack}/stats-pubprice-mcp/server.js"],
-        "env": {"VWORLD_API_KEY": k("VWORLD_API_KEY")},
+        "env": {
+            "VWORLD_API_KEY": k("VWORLD_API_KEY"),
+            "VWORLD_DOMAIN":  k("VWORLD_DOMAIN"),
+        },
     }
 
 # 기존 mcp.json에 병합 (다른 MCP 설정 유지)

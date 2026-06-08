@@ -96,20 +96,45 @@ foreach ($mcp in $mcpList) {
     }
 }
 
-# ── 5. mcp.json 생성 (Python으로 안전하게) ───────────────
+# ── 4-b. stats-pubprice-mcp (Node.js) ────────────────────
+$nodeOk = $false
+try {
+    $v = & node --version 2>&1
+    if ($LASTEXITCODE -eq 0) { OK "Node.js 확인: $v"; $nodeOk = $true }
+} catch {}
+
+if (-not $nodeOk) {
+    WARN "Node.js 없음 — stats-pubprice-mcp(공시가격) 건너뜁니다."
+    WARN "Node.js 설치: winget install OpenJS.NodeJS.LTS 실행 후 bat 다시 실행"
+} else {
+    $pubpriceReq = Join-Path $ypstack "stats-pubprice-mcp\package.json"
+    if (Test-Path $pubpriceReq) {
+        $pubpriceDir = Join-Path $ypstack "stats-pubprice-mcp"
+        Set-Location $pubpriceDir
+        & npm install --silent 2>&1 | Out-Null
+        Set-Location $PSScriptRoot
+        OK "stats-pubprice-mcp"
+    }
+}
+
+# ── 5. 설정 파일 생성 (Claude Desktop + Claude Code) ─────
 Write-Host ""
-GO "Claude Code 설정 파일 생성 중..."
+GO "Claude Desktop / Claude Code 설정 파일 생성 중..."
 
 $ys = $ypstack.Replace("\", "/")
 $tmpPy = Join-Path $env:TEMP "ypstack_mcp_setup.py"
 
-# 단일 인용 here-string: PowerShell 변수 확장 없음
 $pyCode = @'
 import json, os, sys
 
-ypstack = sys.argv[1]
-mcp_path = os.path.join(os.path.expanduser("~"), ".claude", "mcp.json")
-os.makedirs(os.path.dirname(mcp_path), exist_ok=True)
+ypstack  = sys.argv[1]
+node_ok  = sys.argv[2] == "true"
+
+# 설정을 저장할 두 경로 (Claude Desktop + Claude Code)
+targets = [
+    os.path.join(os.environ.get("APPDATA", ""), "Roaming", "Claude", "claude_desktop_config.json"),
+    os.path.join(os.path.expanduser("~"), ".claude", "mcp.json"),
+]
 
 new_servers = {
     "stats-realty": {
@@ -187,29 +212,38 @@ new_servers = {
     },
 }
 
-existing = {}
-if os.path.exists(mcp_path):
-    try:
-        with open(mcp_path, encoding="utf-8") as f:
-            existing = json.load(f)
-    except Exception:
-        pass
+if node_ok:
+    new_servers["stats-pubprice"] = {
+        "command": "node",
+        "args": [f"{ypstack}/stats-pubprice-mcp/server.js"],
+        "env": {
+            "VWORLD_API_KEY": "ED4B0E1F-6D78-3D81-9301-8471900DD71F",
+            "VWORLD_DOMAIN":  "localhost",
+        },
+    }
 
-existing.setdefault("mcpServers", {})
-existing["mcpServers"].update(new_servers)
-
-with open(mcp_path, "w", encoding="utf-8") as f:
-    json.dump(existing, f, indent=2, ensure_ascii=False)
-    f.write("\n")
-
-print(f"저장 완료: {mcp_path}")
+for path in targets:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    existing = {}
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                existing = json.load(f)
+        except Exception:
+            pass
+    existing.setdefault("mcpServers", {})
+    existing["mcpServers"].update(new_servers)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(existing, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    print(f"저장 완료: {path}")
 '@
 
 $pyCode | Set-Content -Path $tmpPy -Encoding UTF8
-& python $tmpPy $ys
+& python $tmpPy $ys $nodeOk.ToString().ToLower()
 Remove-Item $tmpPy -ErrorAction SilentlyContinue
 
-OK "Claude Code 설정 파일 생성 완료"
+OK "설정 파일 생성 완료 (Claude Desktop + Claude Code)"
 
 # ── 완료 ─────────────────────────────────────────────────
 Write-Host ""
@@ -218,7 +252,7 @@ Write-Host "  설치 완료!" -ForegroundColor Green
 Write-Host ""
 Write-Host "  이제 아래 2단계만 하시면 됩니다:" -ForegroundColor White
 Write-Host ""
-Write-Host "  1) Claude Code 앱을 완전히 종료 후 다시 시작" -ForegroundColor White
+Write-Host "  1) Claude Desktop / Claude Code 앱을 완전히 종료 후 다시 시작" -ForegroundColor White
 Write-Host "     (작업표시줄에서 우클릭 -> 닫기 또는 완전 종료)" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "  2) 채팅창에 아래 입력 후 연결 확인" -ForegroundColor White
