@@ -283,11 +283,11 @@ headers = {
 
 #### 5.2.1 kb-price-mcp 확장
 
-- HAR 캡처에서 53개 고유 엔드포인트 발견. 우선순위 후보:
-  1. `kb_get_complex_schools` — 학군
-  2. `kb_get_complex_facilities` — 인근 편의시설
-  3. `kb_get_complex_tax_estimate` — 보유세·취득세 시뮬
-  4. `kb_get_complex_listings_count` — 매물 수 추이
+- ✅ `kb_get_complex_schools` — 학군(주변 초/중/고, 거리순) **구현 완료 (2026-06)**
+- ✅ `kb_get_complex_facilities` — 주변 편의시설(학원/병원/지하철/스타벅스, 거리순) **구현 완료 (2026-06)**
+- ❌ `kb_get_complex_tax_estimate` — 보유세·취득세: KB 직접 API 없음(공시지가만 존재) → 미구현
+- ⏸ `kb_get_complex_listings_count` — 매물수: 시계열 API 없음 + 현재 건수는 기존 도구(`complex/main`·`kb_get_complex_price`)에 이미 노출 → 보류
+- (상세 엔드포인트 명세: `kb-price-mcp/docs/ENDPOINTS.md`)
 
 #### 5.2.2 통합 워크플로 도구 `analyze_complex`
 

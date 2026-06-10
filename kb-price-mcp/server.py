@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
+import math
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -384,6 +385,169 @@ async def kb_get_complex_price_history(
 
 
 # ---------------------------------------------------------------------------
+# 도구 5: 단지 주변 학교 (학군)
+# ---------------------------------------------------------------------------
+
+_SCHOL_LEVEL = {"03": "초등학교", "04": "중학교", "05": "고등학교"}
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_complex_schools(
+    complex_no: str,
+    radius_m: int = 1000,
+    levels: str = "초중고",
+) -> str:
+    """단지 주변 학교(학군)를 조회합니다 (KB 지도 마커, API 키 불필요).
+
+    단지 좌표를 중심으로 반경 내 초·중·고 학교를 거리순으로 반환합니다.
+
+    Args:
+        complex_no: 단지기본일련번호 (kb_search_complex 의 complex_no)
+        radius_m: 검색 반경(m). 기본 1000.
+        levels: 조회할 학교급 — "초","중","고" 조합 (기본 "초중고")
+    """
+    if not complex_no:
+        return _err("complex_no 가 비어 있습니다.")
+    codes = []
+    if "초" in levels:
+        codes.append("03")
+    if "중" in levels:
+        codes.append("04")
+    if "고" in levels:
+        codes.append("05")
+    if not codes:
+        return _err("levels 는 초/중/고 중 하나 이상이어야 합니다.", levels=levels)
+
+    client = get_client()
+    lat, lng, name_or_err = await _complex_centroid(client, complex_no)
+    if lat is None:
+        return _ok(name_or_err)  # 에러 dict
+
+    res = await client.get_json(
+        "/land-complex/map/scholMarkerList",
+        dict(_bbox(lat, lng, radius_m), scholCode=",".join(codes)),
+    )
+    if "error" in res:
+        return _ok(res)
+
+    rows = []
+    for s in res["data"] or []:
+        slat, slng = _to_float(s.get("wgs84위도")), _to_float(s.get("wgs84경도"))
+        dist = _haversine_m(lat, lng, slat, slng) if slat is not None and slng is not None else None
+        if dist is not None and dist > radius_m:
+            continue
+        rows.append({
+            "school_id": s.get("학교식별자"),
+            "name": s.get("학교명"),
+            "level": _SCHOL_LEVEL.get(str(s.get("학교과정분류구분")), s.get("학교과정분류구분")),
+            "lat": slat,
+            "lng": slng,
+            "distance_m": dist,
+        })
+    rows.sort(key=lambda r: r["distance_m"] if r["distance_m"] is not None else 1e9)
+
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r["level"]] = counts.get(r["level"], 0) + 1
+
+    return _ok({
+        "complex_no": complex_no,
+        "complex_name": name_or_err,
+        "radius_m": radius_m,
+        "count": len(rows),
+        "count_by_level": counts,
+        "schools": rows,
+    })
+
+
+# ---------------------------------------------------------------------------
+# 도구 6: 단지 주변 편의시설 (학원·병원·지하철·스타벅스)
+# ---------------------------------------------------------------------------
+
+_FACILITY_API = {
+    "academy":   "/land-complex/honeyLocation/academyMarkerList",
+    "hospital":  "/land-complex/honeyLocation/hospitalMarkerList",
+    "subway":    "/land-complex/honeyLocation/subwayMarkerList",
+    "starbucks": "/land-complex/honeyLocation/starbucksMarkerList",
+}
+
+
+def _parse_facility(kind: str, m: dict, dist: Optional[int]) -> dict:
+    base = {
+        "lat": _to_float(m.get("wgs84위도")),
+        "lng": _to_float(m.get("wgs84경도")),
+        "distance_m": dist,
+    }
+    if kind == "academy":
+        base.update({"category": m.get("대표종류"), "count": m.get("학원개수"),
+                     "names": (m.get("학원목록") or "").split("|") if m.get("학원목록") else []})
+    elif kind == "hospital":
+        base.update({"category": m.get("대표종류"), "count": m.get("병원개수"),
+                     "names": (m.get("병원목록") or "").split("|") if m.get("병원목록") else []})
+    elif kind == "subway":
+        base.update({"station": m.get("지하철역명"), "line": m.get("지하철호선명")})
+    elif kind == "starbucks":
+        base.update({"branch": m.get("지점명")})
+    return base
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
+async def kb_get_complex_facilities(
+    complex_no: str,
+    types: str = "academy,hospital,subway,starbucks",
+    radius_m: int = 1000,
+    limit_per_type: int = 20,
+) -> str:
+    """단지 주변 편의시설(학원·병원·지하철·스타벅스)을 조회합니다 (KB 지도 마커, API 키 불필요).
+
+    단지 좌표 중심 반경 내 시설을 종류별로 거리순 반환합니다.
+
+    Args:
+        complex_no: 단지기본일련번호
+        types: 조회할 종류 콤마 구분 — academy, hospital, subway, starbucks (기본 전체)
+        radius_m: 검색 반경(m). 기본 1000.
+        limit_per_type: 종류별 최대 반환 개수 (거리순). 기본 20.
+    """
+    if not complex_no:
+        return _err("complex_no 가 비어 있습니다.")
+    want = [t.strip() for t in types.split(",") if t.strip() in _FACILITY_API]
+    if not want:
+        return _err("types 에 academy/hospital/subway/starbucks 중 하나 이상 필요.", types=types)
+
+    client = get_client()
+    lat, lng, name_or_err = await _complex_centroid(client, complex_no)
+    if lat is None:
+        return _ok(name_or_err)  # 에러 dict
+    box = _bbox(lat, lng, radius_m)
+
+    out: dict[str, Any] = {}
+    counts: dict[str, int] = {}
+    for kind in want:
+        res = await client.get_json(_FACILITY_API[kind], box)
+        if "error" in res:
+            out[kind] = {"error": res["error"]}
+            continue
+        items = []
+        for m in res["data"] or []:
+            mlat, mlng = _to_float(m.get("wgs84위도")), _to_float(m.get("wgs84경도"))
+            dist = _haversine_m(lat, lng, mlat, mlng) if mlat is not None and mlng is not None else None
+            if dist is not None and dist > radius_m:
+                continue
+            items.append(_parse_facility(kind, m, dist))
+        items.sort(key=lambda r: r["distance_m"] if r["distance_m"] is not None else 1e9)
+        counts[kind] = len(items)
+        out[kind] = items[:limit_per_type]
+
+    return _ok({
+        "complex_no": complex_no,
+        "complex_name": name_or_err,
+        "radius_m": radius_m,
+        "count_by_type": counts,
+        "facilities": out,
+    })
+
+
+# ---------------------------------------------------------------------------
 # 헬퍼
 # ---------------------------------------------------------------------------
 
@@ -403,6 +567,40 @@ def _to_float(v: Any) -> Optional[float]:
         return float(str(v).replace(",", "").strip())
     except (ValueError, TypeError):
         return None
+
+
+def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> int:
+    """두 위경도 간 거리(m, 반올림 정수)."""
+    R = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return int(round(2 * R * math.asin(math.sqrt(a))))
+
+
+def _bbox(lat: float, lng: float, radius_m: int) -> dict:
+    """단지 좌표 중심 radius_m 반경의 KB 지도 bounding box (+zoomLevel)."""
+    dlat = radius_m / 111_000.0
+    dlng = radius_m / (111_000.0 * max(0.1, math.cos(math.radians(lat))))
+    return {
+        "startLat": lat - dlat, "startLng": lng - dlng,
+        "endLat": lat + dlat, "endLng": lng + dlng,
+        "zoomLevel": 16,
+    }
+
+
+async def _complex_centroid(client, complex_no: str):
+    """단지 main 에서 (위도, 경도, 단지명) 반환. 실패 시 (None, None, 에러dict)."""
+    m = await client.get_json("/land-complex/complex/main", {"단지기본일련번호": complex_no})
+    if "error" in m:
+        return None, None, m
+    d = m["data"]
+    lat = _to_float(d.get("wgs84위도"))
+    lng = _to_float(d.get("wgs84경도"))
+    if lat is None or lng is None:
+        return None, None, {"error": "단지 좌표(wgs84위도/경도)를 찾지 못했습니다.", "complex_no": complex_no}
+    return lat, lng, d.get("단지명")
 
 
 # ---------------------------------------------------------------------------
