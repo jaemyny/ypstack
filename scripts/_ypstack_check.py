@@ -13,9 +13,8 @@ from pathlib import Path
 
 _YPSTACK = Path(os.path.expanduser("~/ypstack"))
 _MARKER = Path(os.path.expanduser("~/.config/ypstack/.last_check"))
-_INSTALLED_VER = Path(os.path.expanduser("~/.config/ypstack/installed_version"))
 _VERSION_FILE = _YPSTACK / "scripts" / "VERSION"
-_UPDATE_CMD = "bash ~/ypstack/scripts/update-stats-pack.sh"
+_UPDATE_CMD = "git -C ~/ypstack pull 후 Claude Code 에서 설치 프롬프트(scripts/claude-install-prompt.md) 재실행"
 _CHECK_INTERVAL_SEC = 86400  # 24시간
 
 
@@ -80,13 +79,10 @@ def _run_checks() -> None:
     except Exception:
         pass
 
-    # ── 3. 로컬 설치 버전과 repo 버전 비교 ────────────────────────────────────
-    installed = _INSTALLED_VER.read_text().strip() if _INSTALLED_VER.exists() else None
-
-    if behind > 0 or (installed and version and installed != version):
-        installed_str = installed or "?"
+    # ── 3. 업데이트 안내 (git 원격 대비 뒤처짐) ───────────────────────────────
+    if behind > 0:
         version_str = version or "?"
-        _warn(f"📦 ypstack 업데이트 있음 (설치: {installed_str} → 최신: {version_str})")
+        _warn(f"📦 ypstack 업데이트 있음 (최신: {version_str})")
         _warn(f"   업데이트: {_UPDATE_CMD}")
 
 

@@ -199,8 +199,7 @@ headers = {
 
 | 항목 | 결과 |
 |---|---|
-| `~/.claude/mcp.json` 에 `kb-price` 등록 | ✅ |
-| CLI (`~/.claude.json`) 에 등록 | ✅ |
+| `~/.claude.json` 최상위 `mcpServers` 에 `kb-price` 등록 (GUI·CLI 공용) | ✅ |
 | GUI 재시작 후 도구 인식 | ✅ (커넥터 메뉴 UI 누락은 cosmetic) |
 | 옛 `~/Desktop/work/proptech_realty_data/` 삭제 | ✅ |
 | `~/.claude/projects/-Users-jaemyny-ypstack/memory/` 갱신 | ✅ |
@@ -217,8 +216,7 @@ headers = {
 │      Claude Code (GUI / CLI)                 │
 │             │                                │
 │             ▼                                │
-│      ~/.claude/mcp.json                      │
-│      ~/.claude.json                          │
+│      ~/.claude.json  (GUI·CLI 공용 단일 설정)│
 └─────────┬────────────────┬───────────────────┘
           │                │
           ▼                ▼
@@ -258,7 +256,7 @@ headers = {
 | `KOSIS_API_KEY` | stats-realty | KOSIS 통계 |
 | `KB_USER_AGENT` | kb-price (선택) | UA 오버라이드 |
 
-모두 `~/.claude/mcp.json` 의 `env` 블록에 등록.
+모두 `~/.claude.json` 의 해당 서버 `env` 블록에 등록.
 
 ---
 
@@ -266,10 +264,9 @@ headers = {
 
 ### 5.1 단기 (1~2 세션 안에)
 
-#### 5.1.1 GUI/CLI MCP 동기화 스크립트
+#### 5.1.1 ~~GUI/CLI MCP 동기화 스크립트~~ (취소 — 불필요)
 
-- **문제:** 새 MCP 추가 시 `~/.claude/mcp.json` (GUI) + `~/.claude.json` (CLI) 양쪽 등록 필요
-- **해결:** `scripts/sync-mcp-config.sh` 작성 — GUI 정본을 CLI 로 전파
+- **재검토(2026-06):** Claude Code 의 GUI·CLI 는 **동일하게 `~/.claude.json`(최상위 `mcpServers`)** 만 읽는다. `~/.claude/mcp.json` 은 어떤 표면도 읽지 않는 죽은 파일이었다(공식 문서 확인). 동기화할 두 파일이 애초에 없으므로 이 작업은 취소.
 
 #### 5.1.2 smoke 테스트 자동화
 
@@ -315,8 +312,7 @@ headers = {
 
 - [ ] `yp-session.sh <new-mcp-subdir>` 로 격리 worktree 진입
 - [ ] `<subdir>/server.py` 작성 (FastMCP 패턴)
-- [ ] `~/.claude/mcp.json` 에 등록 (절대경로)
-- [ ] `claude mcp add-json` 으로 CLI 도 등록
+- [ ] `~/.claude.json` 최상위 `mcpServers` 에 등록 (절대경로, GUI·CLI 공용) — 또는 `claude mcp add-json --scope user`
 - [ ] Claude Code 완전 재시작
 - [ ] 도메인별 표준 케이스로 smoke 테스트
 - [ ] `~/.claude/projects/-Users-jaemyny-ypstack/memory/project_*.md` 갱신
