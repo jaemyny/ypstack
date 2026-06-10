@@ -46,6 +46,12 @@ def _parse_version_file():
     return version, keys_expire
 
 
+def get_version() -> str:
+    """scripts/VERSION 의 버전 문자열 (없으면 '0.0.0')."""
+    version, _ = _parse_version_file()
+    return version or "0.0.0"
+
+
 def _run_checks() -> None:
     version, keys_expire = _parse_version_file()
 

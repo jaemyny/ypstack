@@ -20,12 +20,15 @@ from kb_client import get_client
 
 mcp = FastMCP("kb-price")
 
-# ── ypstack 업데이트 자동 확인 (1일 1회) ──────────────────────────────────────
+# ── ypstack 업데이트 자동 확인 (1일 1회) + 버전 ───────────────────────────────
+__version__ = "0.0.0"
 try:
     import sys as _sys, os as _os
     _sys.path.insert(0, _os.path.expanduser("~/ypstack/scripts"))
-    from _ypstack_check import check_once as _yp_check; _yp_check()
-    del _sys, _os, _yp_check
+    from _ypstack_check import check_once as _yp_check, get_version as _yp_ver
+    _yp_check()
+    __version__ = _yp_ver()
+    del _sys, _os, _yp_check, _yp_ver
 except Exception:
     pass
 # ──────────────────────────────────────────────────────────────────────────────

@@ -78,11 +78,11 @@ git_repo: github.com/jaemyny/ypstack
 
 **기존:** `kb_get_price_stats` 1개 도구 (4종 분기) — DEPRECATED 처리
 
-**신규 (총 18개 등록 / ✅ 16개 작동 / ❌ 2개 KB 차단):**
+**신규 (✅ 16개 작동; 비작동 2개 `kb_get_price_index`·`kb_get_price_stats` 는 2026-06 코드 제거):**
 
 | # | 도구 | KB 엑셀 시트 매핑 | 상태 |
 |---|---|---|---|
-| 1 | `kb_get_price_index` | 월간 1~8, 주간 3~4 | ❌ KB 서버 차단 |
+| 1 | `kb_get_price_index` | 월간 1~8, 주간 3~4 | 🗑️ 제거됨 (2026-06, KB 차단) |
 | 2 | `kb_get_price_index_change_rate` | 주간 1~2 (증감률) | ✅ |
 | 3 | `kb_get_price_index_by_area` | 월간 39~40 (전용면적별) | ✅ |
 | 4 | `kb_get_average_price` | 월간 41~42 | ✅ |
@@ -99,7 +99,7 @@ git_repo: github.com/jaemyny/ypstack
 | 15 | `kb_get_market_trend` | 월간 21~26, 주간 5~8 | ✅ |
 | 16 | `kb_get_jeonse_price_ratio` | 월간 27~30 | ✅ |
 | 17 | `kb_get_jeonwolse_conversion_rate` | 월간 59 | ✅ |
-| 18 | `kb_get_price_stats` (legacy) | — | ❌ DEPRECATED |
+| 18 | `kb_get_price_stats` (legacy) | — | 🗑️ 제거됨 (2026-06) |
 
 **기술 스택:**
 
@@ -111,7 +111,7 @@ git_repo: github.com/jaemyny/ypstack
 
 - `Kbland().get_price_index()` 가 `RemoteDisconnected` 발생 → KB 서버측 IP/UA 차단 추정
 - 라이브러리/코드 수정 무관, 우회 불가
-- → #1, #18 은 deprecation 메시지 반환으로 전환 (다른 세션이 별도 커밋으로 처리)
+- → #1, #18 은 2026-06 코드 제거 완료 (그 전까지 deprecation 메시지 반환)
 - **시장 동향이 필요하면 #2 (증감률) 또는 #14 (선도50) 사용**
 
 ### 3.2 작업 (b): kb-price-mcp 신규 구축
@@ -300,7 +300,7 @@ headers = {
 
 ### 5.3 위생
 
-- deprecated 도구 코드 제거 (`kb_get_price_stats`, `kb_get_price_index`)
+- ✅ deprecated 도구 코드 제거 완료 — `kb_get_price_stats`, `kb_get_price_index` (2026-06)
 - README 보강 (사용 예시 5개 추가)
 - `__version__` 도입
 

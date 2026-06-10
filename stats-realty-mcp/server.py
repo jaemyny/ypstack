@@ -14,12 +14,15 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("stats-realty")
 
-# ── ypstack 업데이트 자동 확인 (1일 1회) ──────────────────────────────────────
+# ── ypstack 업데이트 자동 확인 (1일 1회) + 버전 ───────────────────────────────
+__version__ = "0.0.0"
 try:
     import sys as _sys, os as _os
     _sys.path.insert(0, _os.path.expanduser("~/ypstack/scripts"))
-    from _ypstack_check import check_once as _yp_check; _yp_check()
-    del _sys, _os, _yp_check
+    from _ypstack_check import check_once as _yp_check, get_version as _yp_ver
+    _yp_check()
+    __version__ = _yp_ver()
+    del _sys, _os, _yp_check, _yp_ver
 except Exception:
     pass
 # ──────────────────────────────────────────────────────────────────────────────
@@ -847,44 +850,6 @@ async def reb_get_housing_trade(
 
 
 # ---------------------------------------------------------------------------
-# 도구 8: KB부동산 통계 (PublicDataReader)
-# ---------------------------------------------------------------------------
-
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
-async def kb_get_price_stats(
-    stat_type: str = "매매지수",
-    region_code: str = "11",
-    period: Optional[int] = 12,
-) -> str:
-    """[DEPRECATED] KB부동산 가격통계 통합 도구.
-
-    ⚠️ 이 도구는 deprecated 되었습니다. 다음 개별 도구를 사용하세요:
-      • stat_type="매매지수"/"전세지수" → KB 서버측 거부로 사용 불가.
-        대안: kb_get_price_index_change_rate / kb_get_lead50 / kb_get_average_price
-      • stat_type="HAI"  → kb_get_hai 직접 호출 권장
-      • stat_type="PIR"  → kb_get_pir 직접 호출 권장
-    """
-    return json.dumps(
-        {
-            "error": "kb_get_price_stats는 deprecated 되었습니다.",
-            "deprecated": True,
-            "redirect_map": {
-                "매매지수": "kb_get_price_index_change_rate / kb_get_lead50 / kb_get_average_price",
-                "전세지수": "kb_get_price_index_change_rate(deal_type='전세') / kb_get_average_price(deal_type='전세')",
-                "HAI":      "kb_get_hai",
-                "PIR":      "kb_get_pir",
-            },
-            "requested": {
-                "stat_type": stat_type,
-                "region_code": region_code,
-                "period": period,
-            },
-        },
-        ensure_ascii=False, indent=2,
-    )
-
-
-# ---------------------------------------------------------------------------
 # KB부동산 공통 상수 · 헬퍼
 # ---------------------------------------------------------------------------
 
@@ -964,53 +929,6 @@ def _kb_df_to_json(
             "data": result,
         },
         ensure_ascii=False,
-    )
-
-
-# ---------------------------------------------------------------------------
-# KB 도구 10: 가격지수
-# ---------------------------------------------------------------------------
-
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
-async def kb_get_price_index(
-    cycle: str = "monthly",
-    property_type: str = "APT",
-    deal_type: str = "매매",
-    region_code: str = "11",
-    period: Optional[int] = 12,
-) -> str:
-    """[DEPRECATED] KB부동산 주택가격지수.
-
-    ⚠️ KB부동산 서버에서 이 엔드포인트(/data/quick/getPriceIndex)가 거부되어
-       현재 데이터를 가져올 수 없습니다 (RemoteDisconnected). 라이브러리 또는
-       서버 측 문제이며 코드로 해결 불가합니다.
-
-    **권장 대안 (의미가 다름에 유의):**
-      • 시장 동향 파악(상승/하락):  kb_get_price_index_change_rate (가격지수 증감률, 작동 확인)
-      • 가격지수 개념의 절대값:     kb_get_lead50 (선도50지수, 작동 확인)
-      • 면적별 가격지수 (소/중/대): kb_get_price_index_by_area (작동 확인)
-      • 실제 평균가격(원):           kb_get_average_price (작동 확인)
-
-    Args:
-        cycle, property_type, deal_type, region_code, period: (호환용 — 실제로는 사용 안 됨)
-    """
-    return json.dumps(
-        {
-            "error": "kb_get_price_index는 KB 서버측 엔드포인트 거부로 현재 사용할 수 없습니다.",
-            "deprecated": True,
-            "alternatives": [
-                {"tool": "kb_get_price_index_change_rate", "purpose": "시장 동향(증감률) — 상승/하락 추세 파악"},
-                {"tool": "kb_get_lead50",                  "purpose": "선도50지수 — 가격지수 절대값과 가장 유사"},
-                {"tool": "kb_get_price_index_by_area",     "purpose": "면적별 가격지수 (소형~대형 5분류)"},
-                {"tool": "kb_get_average_price",           "purpose": "실제 평균가격 (원 단위)"},
-            ],
-            "diagnosis": "PublicDataReader.Kbland().get_price_index() → RemoteDisconnected. KB 서버측 차단 추정.",
-            "requested_params": {
-                "cycle": cycle, "property_type": property_type, "deal_type": deal_type,
-                "region_code": region_code, "period": period,
-            },
-        },
-        ensure_ascii=False, indent=2,
     )
 
 

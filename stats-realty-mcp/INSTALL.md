@@ -15,7 +15,7 @@ Claude Code에서 자연어로 아파트 실거래·전월세·단지정보·주
 | `apt_get_complex_detail` | 아파트 단지 상세정보 | DATA_GO_KR |
 | `molit_get_housing_permit` | 주택건설 인허가 실적 | KOSIS |
 | `reb_get_price_index` | 한국부동산원 매매·전세 가격지수 | REB |
-| `kb_get_price_stats` | KB부동산 가격통계 (HAI·PIR 포함) | 불필요 |
+| `kb_get_average_price` 외 KB 통계 다수 | KB 평균가격·지수·HAI·PIR 등 | 불필요 |
 | `rtms_get_lawd_codes` | 지역 법정동 코드 조회 | 불필요 |
 
 ---
