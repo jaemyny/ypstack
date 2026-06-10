@@ -1,65 +1,147 @@
-# ypstack MCP 설치 프롬프트 — Windows · Claude Desktop / Claude Code
+# ypstack MCP 설치 프롬프트 — Windows · Claude Code 전용
 
-> ## 사용 방법
+> ## 사용 방법 (⚠️ 반드시 Claude **Code** 에서 실행)
 >
-> 1. 이 ZIP 파일(또는 폴더)을 Claude 채팅창 하단의 📎 클립 아이콘으로 첨부하세요.
-> 2. 아래 구분선 이하의 프롬프트 전체를 복사해서 채팅창에 붙여넣으세요.
-> 3. 엔터를 누르면 Claude가 자동으로 설치를 진행합니다.
+> 이 설치는 **Claude Code** 에서만 동작합니다. 두 가지 중 편한 방법으로 시작하세요:
+> - **A. 데스크톱 앱의 `Code` 탭** — 새 채팅 → 📎 로 `ypstack` ZIP/폴더 첨부 → 아래 프롬프트 붙여넣기
+> - **B. 터미널(PowerShell)** — `cd "$env:USERPROFILE\ypstack"` 후 `claude` 실행 → 아래 프롬프트 붙여넣기
 >
-> ※ 완료까지 약 5~10분 소요 | Python이나 Node.js가 없으면 설치 방법을 안내해 드립니다.
+> ❌ **데스크톱 앱의 `Chat` 탭(또는 Chat 창)에서는 안 됩니다** — 그 Claude는 인터넷 너머
+> 격리된 리눅스 샌드박스에서 돌기 때문에 여러분 PC에 파일을 쓰거나 명령을 실행할 수 없습니다.
+> 설치 안내만 출력될 뿐 실제 설치가 진행되지 않습니다.
+>
+> ※ 설치 중 명령 실행 허용을 물으면 승인해 주세요. 완료까지 약 5~10분.
 
 ---
 
-현재 첨부된 파일(ypstack 저장소)에 포함된 MCP 서버들을 이 Windows 환경의 Claude Desktop 및 Claude Code에서 사용할 수 있도록 설치하고 설정해 줘. 아래 단계별 지침을 순서대로 엄격하게 따라 진행해 줘.
+첨부했거나 `C:\Users\<사용자명>\ypstack\` 에 풀어둔 ypstack 저장소의 MCP 서버들을
+이 Windows 환경의 **Claude Code** 에서 쓸 수 있도록 설치·설정해 줘. 너는 지금 내 PC에서
+실행 중인 Claude Code(Code 탭 또는 CLI)이므로 실제 파일·명령 접근이 가능하다.
+소스가 `C:\Users\<사용자명>\ypstack\` 에 없으면 먼저 거기에 배치(압축 해제/복사)한 뒤,
+아래 단계를 순서대로 엄격히 따라라.
 
 **1. 환경 점검 및 런타임 설치**
-- Python과 Node.js가 설치되어 있는지 확인해.
-- Python이 없으면 설치 안내를 먼저 출력하고 중단해 줘:
+- `python --version`, `node --version` 으로 설치 여부 확인.
+- Python 이 없으면 설치를 진행하지 말고 아래만 출력하고 중단:
   - https://www.python.org/downloads/ 에서 다운로드
-  - 설치 첫 화면에서 반드시 "Add Python to PATH" 체크
-  - 설치 완료 후 이 프롬프트 다시 실행
-- Node.js가 없으면 PowerShell에서 `winget install OpenJS.NodeJS.LTS` 로 자동 설치해.
-- Python 버전 확인: `stats-realty-mcp`의 `PublicDataReader` 패키지가 Python 3.14에서 호환 문제가 있을 수 있으니 확인하고 문제 시 보고해 줘.
+  - 설치 첫 화면에서 반드시 **"Add Python to PATH"** 체크
+  - 설치 후 Claude Code 를 새로 시작해 다시 이 프롬프트 실행
+- Node.js 가 없으면 `winget install OpenJS.NodeJS.LTS` 로 설치 시도. 실패하면 보고만 하고
+  stats-pubprice 서버는 건너뛰고 나머지는 계속 진행.
+- Python 3.14 이면 `stats-realty-mcp` 의 `PublicDataReader` 호환 문제가 있을 수 있으니
+  설치 오류 시 3.12/3.13 사용을 권고하라.
 
-**2. MCP 소스 배치 및 의존성 설치**
-- 첨부된 ypstack 소스를 `C:\Users\<현재사용자명>\ypstack\` 경로에 복사/배치해.
-  (이미 해당 경로에 있으면 그대로 사용해도 됨)
-- **Python 기반 MCP 9개** — 각 폴더에서 `pip install -r requirements.txt` 실행:
+**2. 의존성 설치**
+- Python 9개 — 각 폴더에서 `python -m pip install -r requirements.txt`:
   stats-realty-mcp, stats-mcp, stats-finance-mcp, stats-job-mcp, stats-biz-mcp,
   stats-transit-mcp, stats-edu-mcp, stats-env-mcp, kb-price-mcp
-- **Node.js 기반 MCP** — stats-pubprice-mcp 폴더에서 `npm install` 실행
+- Node 1개 — `stats-pubprice-mcp` 폴더에서 `npm install`
 
-**3. API 키 (별도 발급 불필요 — 아래 값 그대로 사용)**
+**3. 설정 파일에 병합할 서버 목록 (경로의 `<사용자명>` 은 실제 홈 경로로 치환)**
 
-| 키 이름 | 값 |
-|---|---|
-| DATA_GO_KR_KEY | 5645096c13aff5acb7516b66709e58a5702796f0afe9df41e486cd02e0148830 |
-| REB_API_KEY | a32cd4fb1ae6467a8870277d0a9d6386 |
-| KOSIS_API_KEY | Y2UwMDE5MzU4MTdhOWIzY2E2NjU3NDQ5Nzk1MzY2M2Q= |
-| SGIS_CONSUMER_KEY | f18615e1d50242f1a3df |
-| SGIS_CONSUMER_SECRET | f4bef8ce9c30440ca904 |
-| SEOUL_API_KEY | 67676975446a6165313032546e4a466e |
-| GG_API_KEY | b4c53be41a034da98e8093f138a700d8 |
-| ECOS_API_KEY | WN3E49K1TCIX2YIIVBW4 |
-| DART_API_KEY | 660ed63c5aecc383b9e03168595fd8bcbca3858f |
-| NEIS_API_KEY | 3f9764de834045c7afb05a92acb90b18 |
-| VWORLD_API_KEY | ED4B0E1F-6D78-3D81-9301-8471900DD71F |
-| VWORLD_DOMAIN | localhost |
+아래 JSON 의 `mcpServers` 를 그대로 등록 대상으로 삼아라. 경로는 forward slash(`/`) 를 쓰고,
+`C:/Users/<사용자명>/ypstack` 부분을 이 PC 의 실제 `%USERPROFILE%/ypstack` 으로 바꿔라.
 
-**4. 설정 파일 업데이트 (두 경로 모두)**
-아래 두 파일에 `mcpServers` 항목을 생성하거나 업데이트해 줘. 기존 항목은 유지하고 ypstack 서버 10개만 추가/업데이트해:
-- Claude Desktop: `%APPDATA%\Roaming\Claude\claude_desktop_config.json`
-- Claude Code: `%USERPROFILE%\.claude\mcp.json`
+```json
+{
+  "mcpServers": {
+    "stats-realty": {
+      "command": "python",
+      "args": ["C:/Users/<사용자명>/ypstack/stats-realty-mcp/server.py"],
+      "env": {
+        "DATA_GO_KR_KEY": "5645096c13aff5acb7516b66709e58a5702796f0afe9df41e486cd02e0148830",
+        "REB_API_KEY": "a32cd4fb1ae6467a8870277d0a9d6386",
+        "KOSIS_API_KEY": "Y2UwMDE5MzU4MTdhOWIzY2E2NjU3NDQ5Nzk1MzY2M2Q="
+      }
+    },
+    "kb-price": {
+      "command": "python",
+      "args": ["C:/Users/<사용자명>/ypstack/kb-price-mcp/server.py"]
+    },
+    "stats": {
+      "command": "python",
+      "args": ["C:/Users/<사용자명>/ypstack/stats-mcp/server.py"],
+      "env": {
+        "KOSIS_API_KEY": "Y2UwMDE5MzU4MTdhOWIzY2E2NjU3NDQ5Nzk1MzY2M2Q=",
+        "SGIS_CONSUMER_KEY": "f18615e1d50242f1a3df",
+        "SGIS_CONSUMER_SECRET": "f4bef8ce9c30440ca904",
+        "SEOUL_API_KEY": "67676975446a6165313032546e4a466e",
+        "GG_API_KEY": "b4c53be41a034da98e8093f138a700d8"
+      }
+    },
+    "stats-finance": {
+      "command": "python",
+      "args": ["C:/Users/<사용자명>/ypstack/stats-finance-mcp/server.py"],
+      "env": {
+        "ECOS_API_KEY": "WN3E49K1TCIX2YIIVBW4",
+        "DART_API_KEY": "660ed63c5aecc383b9e03168595fd8bcbca3858f"
+      }
+    },
+    "stats-job": {
+      "command": "python",
+      "args": ["C:/Users/<사용자명>/ypstack/stats-job-mcp/server.py"],
+      "env": {
+        "KOSIS_API_KEY": "Y2UwMDE5MzU4MTdhOWIzY2E2NjU3NDQ5Nzk1MzY2M2Q=",
+        "DATA_GO_KR_KEY": "5645096c13aff5acb7516b66709e58a5702796f0afe9df41e486cd02e0148830"
+      }
+    },
+    "stats-biz": {
+      "command": "python",
+      "args": ["C:/Users/<사용자명>/ypstack/stats-biz-mcp/server.py"],
+      "env": {
+        "DATA_GO_KR_KEY": "5645096c13aff5acb7516b66709e58a5702796f0afe9df41e486cd02e0148830",
+        "SEOUL_API_KEY": "67676975446a6165313032546e4a466e",
+        "REB_API_KEY": "a32cd4fb1ae6467a8870277d0a9d6386"
+      }
+    },
+    "stats-transit": {
+      "command": "python",
+      "args": ["C:/Users/<사용자명>/ypstack/stats-transit-mcp/server.py"],
+      "env": {
+        "SEOUL_API_KEY": "67676975446a6165313032546e4a466e",
+        "KOSIS_API_KEY": "Y2UwMDE5MzU4MTdhOWIzY2E2NjU3NDQ5Nzk1MzY2M2Q="
+      }
+    },
+    "stats-edu": {
+      "command": "python",
+      "args": ["C:/Users/<사용자명>/ypstack/stats-edu-mcp/server.py"],
+      "env": {
+        "NEIS_API_KEY": "3f9764de834045c7afb05a92acb90b18"
+      }
+    },
+    "stats-env": {
+      "command": "python",
+      "args": ["C:/Users/<사용자명>/ypstack/stats-env-mcp/server.py"],
+      "env": {
+        "DATA_GO_KR_KEY": "5645096c13aff5acb7516b66709e58a5702796f0afe9df41e486cd02e0148830",
+        "SEOUL_API_KEY": "67676975446a6165313032546e4a466e",
+        "KOSIS_API_KEY": "Y2UwMDE5MzU4MTdhOWIzY2E2NjU3NDQ5Nzk1MzY2M2Q="
+      }
+    },
+    "stats-pubprice": {
+      "command": "node",
+      "args": ["C:/Users/<사용자명>/ypstack/stats-pubprice-mcp/src/index.js"],
+      "env": {
+        "VWORLD_API_KEY": "ED4B0E1F-6D78-3D81-9301-8471900DD71F",
+        "VWORLD_DOMAIN": "localhost"
+      }
+    }
+  }
+}
+```
 
-등록할 서버 목록:
-- Python 기반 (command: "python"): stats-realty, kb-price, stats, stats-finance, stats-job, stats-biz, stats-transit, stats-edu, stats-env
-- Node.js 기반 (command: "node"): stats-pubprice
+**4. 설정 파일에 병합 (기존 항목 보존, 위 서버만 추가/갱신)**
 
-각 서버 args에는 `C:\Users\<현재사용자명>\ypstack\<서버폴더명>\server.py(또는 server.js)` 절대 경로 사용.
-해당하는 API 키를 env 항목에 정확히 주입해.
+- **Claude Code (필수):** `%USERPROFILE%\.claude.json` 파일의 **최상위 `mcpServers` 키**에 병합하라.
+  - ⚠️ `.claude\mcp.json` 이 아니라 홈 폴더의 **`.claude.json` 파일**이다. Claude Code(Code 탭·CLI)는 이 파일을 읽는다.
+  - 파일이 없으면 새로 만들고, 있으면 JSON 을 읽어 기존 내용 보존 후 `mcpServers` 만 병합하라.
+- **Claude Desktop Chat (선택, Chat 앱에서도 쓸 때만):**
+  `%APPDATA%\Claude\claude_desktop_config.json` 에 같은 `mcpServers` 를 병합하라.
+  - 단, `%APPDATA%\Claude\` 폴더가 없고 `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`
+    가 존재하면(= MS Store 설치판), 그쪽 `claude_desktop_config.json` 에 써라.
 
 **5. 검증 및 완료 보고**
-설정 완료 후:
-- 저장된 두 config 파일의 mcpServers 항목(서버 이름 목록)을 간략히 출력
-- Claude Desktop 재시작 방법 안내
-- 채팅창에 `/mcp` 입력 시 connected로 표시되면 완료임을 안내
+- 어느 파일에 어떤 서버를 넣었는지 이름 목록을 출력하라.
+- Claude Code 는 재시작이 필요하다: 현재 세션/창을 종료하고 다시 시작한 뒤
+  `/mcp` 를 입력해 `connected` 표시를 확인하라고 안내하라.
+- Claude Desktop Chat 도 설정했다면 트레이 아이콘 우클릭 → 종료 후 재실행하라고 안내하라.
